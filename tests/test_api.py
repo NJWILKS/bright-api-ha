@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from unittest.mock import AsyncMock
 
 import pytest
@@ -51,24 +51,24 @@ async def test_get_readings_preserves_zero_and_null(client: BrightApiClient) -> 
 
     rows = await client.get_readings(
         "resource-1",
-        datetime(2026, 1, 1, tzinfo=timezone.utc),
-        datetime(2026, 1, 2, tzinfo=timezone.utc),
+        datetime(2026, 1, 1, tzinfo=UTC),
+        datetime(2026, 1, 2, tzinfo=UTC),
     )
 
     assert [value for _, value in rows] == [0.0, None, 1.25]
-    assert all(timestamp.tzinfo is timezone.utc for timestamp, _ in rows)
+    assert all(timestamp.tzinfo is UTC for timestamp, _ in rows)
 
 
 @pytest.mark.asyncio
 async def test_first_available_reading_uses_actual_pt30m_data(client: BrightApiClient) -> None:
-    locator = datetime(2025, 10, 26, 0, 0, tzinfo=timezone.utc)
-    actual = datetime(2025, 10, 26, 1, 30, tzinfo=timezone.utc)
+    locator = datetime(2025, 10, 26, 0, 0, tzinfo=UTC)
+    actual = datetime(2025, 10, 26, 1, 30, tzinfo=UTC)
     client.get_first_reading_time = AsyncMock(return_value=locator)  # type: ignore[method-assign]
     client.get_readings = AsyncMock(  # type: ignore[method-assign]
         return_value=[
-            (datetime(2025, 10, 26, 0, 30, tzinfo=timezone.utc), None),
+            (datetime(2025, 10, 26, 0, 30, tzinfo=UTC), None),
             (actual, 0.0),
-            (datetime(2025, 10, 26, 2, 0, tzinfo=timezone.utc), 0.2),
+            (datetime(2025, 10, 26, 2, 0, tzinfo=UTC), 0.2),
         ]
     )
 
