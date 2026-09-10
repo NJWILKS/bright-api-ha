@@ -4,9 +4,8 @@ on:
   workflow_dispatch:
     inputs:
       ref:
-        description: Branch, tag or exact commit SHA to validate
+        description: Exact commit SHA to validate
         required: true
-        default: feature/interval-ledger
 
 permissions:
   contents: read
@@ -42,4 +41,4 @@ jobs:
           GLOWMARKT_USERNAME: ${{ secrets.GLOWMARKT_USERNAME }}
           GLOWMARKT_PASSWORD: ${{ secrets.GLOWMARKT_PASSWORD }}
           PYTHONPATH: .
-        run: pytest -m live live_tests
+        run: pytest --force-enable-socket -m live live_tests
