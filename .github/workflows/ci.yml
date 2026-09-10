@@ -24,7 +24,7 @@ jobs:
       - name: Install test dependencies
         run: python -m pip install -r requirements-dev.txt
       - name: Lint
-        run: ruff check custom_components/bright_api tests
+        run: ruff check custom_components/bright_api tests live_tests
       - name: Test
         run: pytest
 
