@@ -8,18 +8,38 @@ import pytest
 from custom_components.bright_api.api import BrightApiClient
 from custom_components.bright_api.history import (
     IntervalHistoryStore,
-    _floor_half_hour,
+    _history_due,
+    _latest_settled_boundary,
     _merge_rows,
+    _next_refresh_utc,
     async_populate_interval_history,
 )
 
 
-def test_floor_half_hour_uses_completed_interval_boundary() -> None:
-    assert _floor_half_hour(datetime(2026, 9, 10, 10, 14, 59, tzinfo=UTC)) == datetime(
-        2026, 9, 10, 10, 0, tzinfo=UTC
+def test_settled_boundary_waits_until_0400_uk_time() -> None:
+    assert _latest_settled_boundary(datetime(2026, 9, 10, 2, 59, tzinfo=UTC)) == datetime(
+        2026, 9, 9, 0, 0, tzinfo=UTC
     )
-    assert _floor_half_hour(datetime(2026, 9, 10, 10, 44, tzinfo=UTC)) == datetime(
-        2026, 9, 10, 10, 30, tzinfo=UTC
+    assert _latest_settled_boundary(datetime(2026, 9, 10, 3, 0, tzinfo=UTC)) == datetime(
+        2026, 9, 10, 0, 0, tzinfo=UTC
+    )
+    assert _latest_settled_boundary(datetime(2026, 1, 10, 3, 59, tzinfo=UTC)) == datetime(
+        2026, 1, 9, 0, 0, tzinfo=UTC
+    )
+    assert _latest_settled_boundary(datetime(2026, 1, 10, 4, 0, tzinfo=UTC)) == datetime(
+        2026, 1, 10, 0, 0, tzinfo=UTC
+    )
+
+
+def test_next_refresh_tracks_0400_europe_london_across_dst() -> None:
+    assert _next_refresh_utc(datetime(2026, 9, 10, 2, 30, tzinfo=UTC)) == datetime(
+        2026, 9, 10, 3, 0, tzinfo=UTC
+    )
+    assert _next_refresh_utc(datetime(2026, 9, 10, 3, 30, tzinfo=UTC)) == datetime(
+        2026, 9, 11, 3, 0, tzinfo=UTC
+    )
+    assert _next_refresh_utc(datetime(2025, 10, 25, 5, 0, tzinfo=UTC)) == datetime(
+        2025, 10, 26, 4, 0, tzinfo=UTC
     )
 
 
@@ -59,8 +79,36 @@ async def test_store_upsert_is_idempotent(hass) -> None:
     assert list(month.values()) == [record]
 
 
+def test_history_due_only_when_usage_ledger_is_behind() -> None:
+    resources = {
+        "electricity.consumption": {"resource_id": "usage-id"},
+        "electricity.consumption.cost": {"resource_id": "cost-id"},
+    }
+    target = datetime(2026, 1, 2, 0, 0, tzinfo=UTC)
+
+    assert _history_due({}, resources, target)
+    assert _history_due(
+        {
+            "commodities": {
+                "electricity": {"cursor_utc": "2026-01-01T00:00:00+00:00"}
+            }
+        },
+        resources,
+        target,
+    )
+    assert not _history_due(
+        {
+            "commodities": {
+                "electricity": {"cursor_utc": "2026-01-02T00:00:00+00:00"}
+            }
+        },
+        resources,
+        target,
+    )
+
+
 @pytest.mark.asyncio
-async def test_population_resumes_from_durable_cursor(hass) -> None:
+async def test_population_resumes_from_durable_cursor_and_usage_defines_start(hass) -> None:
     client = AsyncMock(spec=BrightApiClient)
     resources = {
         "electricity.consumption": {"resource_id": "usage-id"},
@@ -79,11 +127,13 @@ async def test_population_resumes_from_durable_cursor(hass) -> None:
                 datetime(2026, 1, 1, 0, 0, tzinfo=UTC): 0.1,
                 datetime(2026, 1, 1, 0, 30, tzinfo=UTC): 0.2,
                 datetime(2026, 1, 1, 1, 0, tzinfo=UTC): 0.3,
+                datetime(2026, 1, 2, 0, 0, tzinfo=UTC): 0.4,
             },
             "cost-id": {
                 datetime(2026, 1, 1, 0, 0, tzinfo=UTC): 2.4,
                 datetime(2026, 1, 1, 0, 30, tzinfo=UTC): 4.8,
                 datetime(2026, 1, 1, 1, 0, tzinfo=UTC): 7.2,
+                datetime(2026, 1, 2, 0, 0, tzinfo=UTC): 9.6,
             },
         }
         return [
@@ -99,30 +149,30 @@ async def test_population_resumes_from_durable_cursor(hass) -> None:
         client,
         resources,
         "entry-1",
-        now_utc=datetime(2026, 1, 1, 1, 0, tzinfo=UTC),
+        now_utc=datetime(2026, 1, 2, 5, 0, tzinfo=UTC),
     )
 
     electricity = first_pass["commodities"]["electricity"]
     assert electricity["status"] == "current"
-    assert electricity["cursor_utc"] == "2026-01-01T01:00:00+00:00"
-    assert client.get_first_available_reading_time.await_count == 2
+    assert electricity["cursor_utc"] == "2026-01-02T00:00:00+00:00"
+    assert client.get_first_available_reading_time.await_count == 1
 
     second_pass = await async_populate_interval_history(
         hass,
         client,
         resources,
         "entry-1",
-        now_utc=datetime(2026, 1, 1, 1, 30, tzinfo=UTC),
+        now_utc=datetime(2026, 1, 3, 5, 0, tzinfo=UTC),
     )
 
     electricity = second_pass["commodities"]["electricity"]
-    assert electricity["cursor_utc"] == "2026-01-01T01:30:00+00:00"
-    assert client.get_first_available_reading_time.await_count == 2
+    assert electricity["cursor_utc"] == "2026-01-03T00:00:00+00:00"
+    assert client.get_first_available_reading_time.await_count == 1
 
     repository = IntervalHistoryStore(hass, "entry-1")
     month = await repository.async_load_month("electricity", "2026-01")
-    assert [row["usage_kwh"] for row in month.values()] == [0.1, 0.2, 0.3]
-    assert [row["cost_pence"] for row in month.values()] == [2.4, 4.8, 7.2]
+    assert [row["usage_kwh"] for row in month.values()] == [0.1, 0.2, 0.3, 0.4]
+    assert [row["cost_pence"] for row in month.values()] == [2.4, 4.8, 7.2, 9.6]
 
     tariff_state = await repository.async_load_tariffs("electricity")
     assert tariff_state["rows"] == client.get_tariffs.return_value
