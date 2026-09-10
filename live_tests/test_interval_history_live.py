@@ -8,7 +8,11 @@ import aiohttp
 import pytest
 
 from custom_components.bright_api.api import BrightApiClient
-from custom_components.bright_api.history import COMMODITIES, IntervalHistoryStore, async_populate_interval_history
+from custom_components.bright_api.history import (
+    COMMODITIES,
+    IntervalHistoryStore,
+    async_populate_interval_history,
+)
 
 pytestmark = pytest.mark.live
 
@@ -22,7 +26,10 @@ def _credentials() -> tuple[str, str]:
 
 
 @pytest.mark.asyncio
-async def test_real_pt30m_ledger_populates_persists_and_resumes(hass) -> None:
+async def test_real_pt30m_ledger_populates_persists_and_resumes(
+    hass,
+    socket_enabled,
+) -> None:
     """Exercise the production history path against Bright and HA Store."""
     username, password = _credentials()
 
@@ -39,8 +46,8 @@ async def test_real_pt30m_ledger_populates_persists_and_resumes(hass) -> None:
 
         discovered = await client.discover_resources(virtual_entity_id)
 
-        selected_name = None
-        selected_resources = {}
+        selected_name: str | None = None
+        selected_resources: dict[str, dict] = {}
         selected_first = None
         for commodity, (usage_classifier, cost_classifier) in COMMODITIES.items():
             usage_resource = discovered.get(usage_classifier)
@@ -60,13 +67,12 @@ async def test_real_pt30m_ledger_populates_persists_and_resumes(hass) -> None:
         assert selected_first is not None
 
         entry_id = "protected_live_contract"
-        first_target = selected_first + timedelta(hours=2)
         first_pass = await async_populate_interval_history(
             hass,
             client,
             selected_resources,
             entry_id,
-            now_utc=first_target,
+            now_utc=selected_first + timedelta(hours=2),
         )
 
         first_state = first_pass["commodities"][selected_name]
@@ -74,20 +80,17 @@ async def test_real_pt30m_ledger_populates_persists_and_resumes(hass) -> None:
         assert first_state.get("last_interval") is not None
 
         repository = IntervalHistoryStore(hass, entry_id)
-        month = selected_first.astimezone().strftime("%Y-%m")
-        # Store partitions use UTC months; recompute explicitly without exposing data.
         month = selected_first.strftime("%Y-%m")
         stored = await repository.async_load_month(selected_name, month)
         assert stored
         assert len(stored) == len(set(stored))
 
-        second_target = selected_first + timedelta(hours=3)
         second_pass = await async_populate_interval_history(
             hass,
             client,
             selected_resources,
             entry_id,
-            now_utc=second_target,
+            now_utc=selected_first + timedelta(hours=3),
         )
         second_state = second_pass["commodities"][selected_name]
         assert second_state["status"] == "current"
