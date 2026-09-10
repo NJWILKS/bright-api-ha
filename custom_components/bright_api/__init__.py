@@ -9,6 +9,7 @@ from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from .api import BrightApiClient
 from .const import DOMAIN
 from .coordinator import BrightDataCoordinator
+from .history import async_interval_history_worker
 
 PLATFORMS = ["sensor"]
 
@@ -25,6 +26,19 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     hass.data.setdefault(DOMAIN, {})[entry.entry_id] = coordinator
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
+
+    # Historical collection is deliberately independent of entity registration
+    # and Recorder. The config entry owns/cancels this background task on unload.
+    entry.async_create_background_task(
+        hass,
+        async_interval_history_worker(
+            hass,
+            client,
+            coordinator.resources,
+            entry.entry_id,
+        ),
+        f"{DOMAIN} PT30M interval history",
+    )
     return True
 
 
