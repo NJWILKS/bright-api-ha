@@ -226,7 +226,11 @@ async def test_live_pt30m_matches_csv_golden_and_cost_identity(socket_enabled) -
             unit_rate, standing = tariff
 
             usage_rows = day_rows[offset]
-            a_usage_priced = sum(float(value) * unit_rate for _, value in usage_rows if value is not None)
+            a_usage_priced = sum(
+                float(value) * unit_rate
+                for _, value in usage_rows
+                if value is not None
+            )
 
             pt30m_cost_rows = _window_rows(
                 await client.get_readings(cost_id, start, end, period="PT30M"), start, end
