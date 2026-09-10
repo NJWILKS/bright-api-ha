@@ -6,6 +6,14 @@ on:
       ref:
         description: Exact commit SHA to validate
         required: true
+      mode:
+        description: Live operation to run
+        required: true
+        type: choice
+        default: contract
+        options:
+          - contract
+          - pt30m-cutover
 
 permissions:
   contents: read
@@ -37,6 +45,7 @@ jobs:
       - name: Lint protected contract
         run: ruff check custom_components/bright_api tests live_tests
       - name: Verify protected Bright API contract
+        if: ${{ inputs.mode == 'contract' }}
         env:
           GLOWMARKT_USERNAME: ${{ secrets.GLOWMARKT_USERNAME }}
           GLOWMARKT_PASSWORD: ${{ secrets.GLOWMARKT_PASSWORD }}
@@ -45,3 +54,10 @@ jobs:
           pytest -p no:homeassistant -m live \
             live_tests/test_golden_electricity_live.py \
             live_tests/test_interval_history_live.py::test_live_pt30m_matches_csv_golden_and_cost_identity
+      - name: Diagnose PT30M timestamp cutover
+        if: ${{ inputs.mode == 'pt30m-cutover' }}
+        env:
+          GLOWMARKT_USERNAME: ${{ secrets.GLOWMARKT_USERNAME }}
+          GLOWMARKT_PASSWORD: ${{ secrets.GLOWMARKT_PASSWORD }}
+          PYTHONPATH: .
+        run: pytest -p no:homeassistant -m live -s live_tests/test_pt30m_cutover_live.py
