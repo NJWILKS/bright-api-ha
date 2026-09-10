@@ -1,7 +1,7 @@
 """Minimal async client for the Hildebrand Glowmarkt API."""
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from typing import Any
 from zoneinfo import ZoneInfo
 
@@ -114,8 +114,8 @@ class BrightApiClient:
         period: str = "PT30M",
     ) -> list[tuple[datetime, float | None]]:
         params = {
-            "from": start.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S"),
-            "to": end.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S"),
+            "from": start.astimezone(UTC).strftime("%Y-%m-%dT%H:%M:%S"),
+            "to": end.astimezone(UTC).strftime("%Y-%m-%dT%H:%M:%S"),
             "period": period,
             "offset": 0,
             "function": "sum",
@@ -129,7 +129,7 @@ class BrightApiClient:
         for item in payload.get("data", []):
             if not isinstance(item, list) or len(item) < 2:
                 continue
-            timestamp = datetime.fromtimestamp(float(item[0]), tz=timezone.utc)
+            timestamp = datetime.fromtimestamp(float(item[0]), tz=UTC)
             value = None if item[1] is None else float(item[1])
             rows.append((timestamp, value))
         return rows
@@ -146,7 +146,7 @@ class BrightApiClient:
         first_ts = (payload.get("data") or {}).get("firstTs")
         if first_ts is None:
             return None
-        return datetime.fromtimestamp(float(first_ts), tz=timezone.utc)
+        return datetime.fromtimestamp(float(first_ts), tz=UTC)
 
     async def get_first_available_reading_time(self, resource_id: str) -> datetime | None:
         """Use first-time only as a locator, then find the first real PT30M row."""
