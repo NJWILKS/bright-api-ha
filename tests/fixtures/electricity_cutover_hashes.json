@@ -1,0 +1,123 @@
+{
+  "schema_version": 1,
+  "source_sha256": "e70bb156e644b0d340694e111715f82d14979834bebd100f29a6f6dd6760ebf4",
+  "normalisation": "UTC_ISO_SECONDS|KWH_3DP joined with newline, SHA-256",
+  "purpose": "PT30M timestamp convention cutover diagnostic only; no raw household values",
+  "range": {
+    "first_local_day": "2026-08-15",
+    "last_local_day": "2026-09-05",
+    "timezone": "Europe/London"
+  },
+  "days": {
+    "2026-08-15": {
+      "count": 48,
+      "csv_hash": "3c0a7ba50a4fdae98bec19a9e49c93344e81e0e7151c8fc7bcbbd1c496857807",
+      "plus_30m_hash": "7faca4d0269593b7a60e158b35dd010c5cf1490d8fcc5612548403c6f54acacb"
+    },
+    "2026-08-16": {
+      "count": 48,
+      "csv_hash": "3c3bdbd847029bcb6b6aa160013592e961c7e829b7065cfc8e3ffb9df273f76e",
+      "plus_30m_hash": "d01dceb0af3d2237aa8425950fa39f352606e1bfb2010c09be5123b0a5876464"
+    },
+    "2026-08-17": {
+      "count": 48,
+      "csv_hash": "67192716ff49fbfe3819e4686b9744689ed39e4e2cad4dfef3da0c7764022bd6",
+      "plus_30m_hash": "f53813a9cd2ae79e145fc128845ee20da4953d7524f66e584d4a300da775d2f4"
+    },
+    "2026-08-18": {
+      "count": 48,
+      "csv_hash": "9312645e87e64124856ce250c579755f55c8e9afd4ed97d56e88fb4bcf831d48",
+      "plus_30m_hash": "9290131a0c605cb8b105f982e92e30af4a6adafb50d92eb385410104a92f1812"
+    },
+    "2026-08-19": {
+      "count": 48,
+      "csv_hash": "69851dfad6aa10f135737a0661e2025bc88567f4f6c04c6a4c6694d3029a0136",
+      "plus_30m_hash": "f86dedd6d6f44eb085030711b9b5be91967335c553ed7a1cc8b58f7a9fb9c2fe"
+    },
+    "2026-08-20": {
+      "count": 48,
+      "csv_hash": "c4ed13dfff1be3d930c631381a86833f98dbbad3151e7bc87779f82810ca826b",
+      "plus_30m_hash": "3ed9e253b8340d640f86cad16bac40c6641266d5fd32deca43309b0805a4a5b1"
+    },
+    "2026-08-21": {
+      "count": 48,
+      "csv_hash": "5a900589478f002c5f5d646e295a5c75844c2478988b18025e9fc3424c7dad52",
+      "plus_30m_hash": "2020f6341c790836b1838bb3c94601f9562cdbff77e38647512f434b99eab83b"
+    },
+    "2026-08-22": {
+      "count": 48,
+      "csv_hash": "a683af3d39e928818a8c341ae2add8f18f27c65ea32ed11598fe8aa72ae78df4",
+      "plus_30m_hash": "d23c5ffddcc391e867a53a606c77301ef56724c900e28fb330c7efc9b926ef85"
+    },
+    "2026-08-23": {
+      "count": 48,
+      "csv_hash": "fd1f57df68539bb0aa727ec558042405c4c156e39ce69250938fcb97aec52751",
+      "plus_30m_hash": "87084d2943b7f4c7ab3b1b6fa4a69c4036847e898b522cfb9c57c2dd0391bfc7"
+    },
+    "2026-08-24": {
+      "count": 48,
+      "csv_hash": "fe26f1b848022cb4af341ad82b3873694bc0c6d7deeeed488f75f2db24309da3",
+      "plus_30m_hash": "da6ef98b5431d3eaf50bd33335fb94f32971959cd470125381d5c20b56f27fab"
+    },
+    "2026-08-25": {
+      "count": 48,
+      "csv_hash": "5642a5a20505db98ac410e95fbb52a16218a68f45688f4055a993bd68552feeb",
+      "plus_30m_hash": "f161a8efe2520f4f4f8ccf9c8fe2f66799f85a47a981e3cd3f2437e500fde8bc"
+    },
+    "2026-08-26": {
+      "count": 48,
+      "csv_hash": "2571e83cfa687bbfd4d000b3c87a916f4e46746a6681901983e8fdd2527d6ecc",
+      "plus_30m_hash": "1d6b7920d4953235924d6977c15a45a0b786370039ff8918dfe49b0361fdff4a"
+    },
+    "2026-08-27": {
+      "count": 48,
+      "csv_hash": "a1a97a5dd93ea533e38d058484650e4f8c2602ac9a70fb975ddae3d86317385a",
+      "plus_30m_hash": "72f147b6ebab669d5472f1d61552c4c7c996d9f25bea0dfee648853e72927d11"
+    },
+    "2026-08-28": {
+      "count": 48,
+      "csv_hash": "bb06ffee0ccd072e687843472c9fd259e303a9375a084fabd93e719ed0e3e3de",
+      "plus_30m_hash": "6f3afbabbf5c40df39f389610150b4ef2b836e0e784589e71d6a105d8ba06d66"
+    },
+    "2026-08-29": {
+      "count": 48,
+      "csv_hash": "d9dac1ce6224935fc7b3c4db742fec330ff686b93a0853ed2dbda5f8d97aa888",
+      "plus_30m_hash": "7938441e896c95ec5745ef1b2386e0f83eafd992951f3b865101f7267ed492b7"
+    },
+    "2026-08-30": {
+      "count": 48,
+      "csv_hash": "1a9ab74308b017329185e596c8674bf9cc43c45329ff6e573d135e3017208196",
+      "plus_30m_hash": "26619228b049c0bd9656ae07d7a33aa92464dda496513c535523dd52c3af2511"
+    },
+    "2026-08-31": {
+      "count": 48,
+      "csv_hash": "22725a7e61748ef397e7628fd26c90f02455f6ffc9d03bcf5ab8f1f2c674371a",
+      "plus_30m_hash": "f6bb04470f078d497d94c070430a872bce8e0da81d0980f026d6703bb4d46141"
+    },
+    "2026-09-01": {
+      "count": 48,
+      "csv_hash": "3ff26996f137ff30dd2754dc5b159d8eee2cfe4c0169182f81525d78b8383eea",
+      "plus_30m_hash": "65303489718ff551de9e9ca3b721532ed6faa227c1bdf352694ce1938ae9d42c"
+    },
+    "2026-09-02": {
+      "count": 48,
+      "csv_hash": "e1434326c72a1b76cc2737e0c177028f6b79c2777ab3323a65e2c1efe875f3f6",
+      "plus_30m_hash": "db23c9fb8cd49b8d42903700a13cdc42aa7d2f474e5631d5662f577a0015b706"
+    },
+    "2026-09-03": {
+      "count": 48,
+      "csv_hash": "87b72d5cf29cecad3451c86067785fe03580b9c649343420d43f58f9f54665da",
+      "plus_30m_hash": "f7f59ececa35ac2c91664994a6f96db9480ccb13ef557915025f1602598d02b0"
+    },
+    "2026-09-04": {
+      "count": 48,
+      "csv_hash": "e7119697831dcdba47b206e8bcc319320d88d2c7e79d2cde918d1fafc788d558",
+      "plus_30m_hash": "7b97e57ebcac26a7e9ba06a87345d6bde30a6031d4a04f5fc2b7021dc331ef1b"
+    },
+    "2026-09-05": {
+      "count": 48,
+      "csv_hash": "0ca71d4164b18862db7a26a3e89a5e8cb3b1a2af8a170bf735b87b7d2025d73a",
+      "plus_30m_hash": "6afee3d6ffcd0f062ad81c0a785c3f20d2d3ba9f44bfea89986a1655f3e37ae5"
+    }
+  }
+}
