@@ -33,28 +33,42 @@ To avoid publishing household interval data, the repository stores SHA-256 finge
 
 Unit prices and standing charges must come from Bright tariff API evidence and must be applied only to the effective period they describe.
 
+The tariff API is not trusted in isolation. Its unit price and standing charge must be reconciled against Bright's own cost resource for completed billing days.
+
 **Required evidence**
 
-- Golden/reference comparison against independently evidenced tariff values for the same effective period.
 - Tests for tariff changes at an effective-date boundary.
 - Raw tariff evidence is stored separately from interval facts.
+- Protected live reconciliation proves the effective unit rate reproduces PT30M usage cost and the standing charge reproduces the residual between PT30M and P1D cost.
 
-A consumption-only CSV cannot prove tariff values by itself; tariff acceptance therefore requires tariff-bearing export/reference evidence in addition to the consumption golden fixture.
+## 4. Daily cost identity and four-way reconciliation
 
-## 4. Daily cost identity
-
-For any Europe/London billing day:
+For any completed Europe/London billing day define:
 
 ```text
-daily usage cost = Σ(PT30M usage kWh × effective unit price for that interval)
-daily total cost = daily usage cost + one applicable standing charge
+A = Σ(PT30M consumption kWh × effective API unit price for each interval)
+B = Σ(Bright PT30M cost resource)
+S = applicable standing charge from the Bright tariff API
+C = Bright P1D cost resource
+```
+
+The integration must prove all of the following within an explicitly documented rounding tolerance:
+
+```text
+A ≈ B
+A + S ≈ C
+C - B ≈ S
 ```
 
 For a flat tariff this reduces to:
 
 ```text
-daily total cost = Σ(PT30M usage kWh) × unit price + standing charge
+daily usage cost = Σ(PT30M kWh) × unit price
+daily total cost = daily usage cost + standing charge
+daily total cost ≈ Bright P1D cost
 ```
+
+This gives independent cross-checks of consumption, unit-rate interpretation, standing-charge interpretation and Bright aggregation semantics. A tariff parser bug must not be able to produce plausible-looking Home Assistant values without failing this contract.
 
 Standing charge is applied exactly once per local billing day, including 46-interval and 50-interval DST days.
 
@@ -63,8 +77,9 @@ A tariff type that cannot be calculated from the available API evidence must rem
 **Required evidence**
 
 - Pure arithmetic unit tests.
-- Golden-data daily reconciliation against independently evidenced tariff/cost data.
+- Protected live reconciliation against Bright PT30M cost and P1D cost.
 - Tests spanning tariff changes and DST transitions.
+- At least one known completed day must prove all three equalities above before release; broader sampled-day reconciliation should be added where the API permits it without excessive calls.
 
 ## 5. Home Assistant presentation capability
 
@@ -75,6 +90,8 @@ The internal model must preserve enough information to expose at least these his
 - total cost.
 
 Home Assistant must therefore be able to display a daily stacked chart with **usage cost** and **standing charge** as the two components. Their combined height is the daily total. A separate total-cost statistic may also exist for Energy-dashboard compatibility but must not be required as a third stacked series.
+
+The P1D cost value is an acceptance oracle for completed-day correctness. It is not a third stacked component.
 
 **Required evidence**
 
