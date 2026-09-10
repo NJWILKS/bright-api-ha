@@ -2,6 +2,7 @@
 asyncio_mode = "auto"
 testpaths = ["tests"]
 pythonpath = ["."]
+markers = ["live: protected tests that call the real Bright API"]
 
 [tool.ruff]
 target-version = "py314"
