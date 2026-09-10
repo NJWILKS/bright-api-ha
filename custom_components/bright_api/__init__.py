@@ -2,14 +2,16 @@
 from __future__ import annotations
 
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import CONF_PASSWORD, CONF_USERNAME
+from homeassistant.const import CONF_PASSWORD, CONF_USERNAME, Platform
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import ConfigEntryNotReady
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
 from .api import BrightApiClient, BrightApiError, BrightAuthError
 from .const import CONF_VIRTUAL_ENTITY_ID, DOMAIN
-from .history import async_interval_history_worker
+from .orchestrator import async_history_and_statistics_worker
+
+PLATFORMS: list[Platform] = [Platform.SENSOR]
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
@@ -30,23 +32,30 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         "resources": resources,
     }
 
+    # Presentation entities only read the integration's durable Store data.
+    # They never become the source of truth for historical consumption/cost.
+    await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
+
     # There is deliberately no 15-minute/current-day polling. Bright historical
-    # PT30M data is treated as settled daily data and the history worker owns the
-    # initial backfill plus the single 04:00 Europe/London refresh cycle.
+    # PT30M data is treated as settled daily data: the ledger worker owns the
+    # initial backfill and one 04:00 Europe/London refresh, then the projector
+    # publishes only durable ledger facts to Home Assistant statistics.
     entry.async_create_background_task(
         hass,
-        async_interval_history_worker(
+        async_history_and_statistics_worker(
             hass,
             client,
             resources,
             entry.entry_id,
         ),
-        f"{DOMAIN} PT30M interval history",
+        f"{DOMAIN} PT30M history and statistics",
     )
     return True
 
 
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Unload a Bright API config entry."""
-    hass.data.get(DOMAIN, {}).pop(entry.entry_id, None)
-    return True
+    unload_ok = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
+    if unload_ok:
+        hass.data.get(DOMAIN, {}).pop(entry.entry_id, None)
+    return unload_ok
