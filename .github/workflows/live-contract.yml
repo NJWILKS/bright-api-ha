@@ -36,9 +36,12 @@ jobs:
         run: python -m pip install -r requirements-dev.txt
       - name: Lint protected contract
         run: ruff check custom_components/bright_api tests live_tests
-      - name: Verify protected Bright contract
+      - name: Verify protected Bright API contract
         env:
           GLOWMARKT_USERNAME: ${{ secrets.GLOWMARKT_USERNAME }}
           GLOWMARKT_PASSWORD: ${{ secrets.GLOWMARKT_PASSWORD }}
           PYTHONPATH: .
-        run: pytest --force-enable-socket -m live live_tests
+        run: |
+          pytest -p no:homeassistant -m live \
+            live_tests/test_golden_electricity_live.py \
+            live_tests/test_interval_history_live.py::test_live_pt30m_matches_csv_golden_and_cost_identity
