@@ -23,7 +23,7 @@ def _credentials() -> tuple[str, str]:
     username = os.environ.get("GLOWMARKT_USERNAME")
     password = os.environ.get("GLOWMARKT_PASSWORD")
     if not username or not password:
-        pytest.skip("Protected Bright credentials are not configured")
+        pytest.fail("Protected Bright credentials are not configured")
     return username, password
 
 
@@ -39,6 +39,17 @@ def _hash_rows(rows: list[tuple[datetime, float]]) -> str:
 
 def _local_midnight(local_day) -> datetime:
     return datetime(local_day.year, local_day.month, local_day.day, tzinfo=UK_TZ)
+
+
+def _print_actuals(label: str, rows: list[tuple[datetime, float]]) -> None:
+    """Emit exact live values when a golden comparison fails."""
+    print(f"LIVE DIAGNOSTIC {label}: {len(rows)} row(s)")
+    for timestamp, value in rows:
+        print(
+            "LIVE DIAGNOSTIC actual: "
+            f"{timestamp.astimezone(UTC).strftime('%Y-%m-%dT%H:%M:%SZ')}|{value:.12g} "
+            f"canonical={value:.3f}"
+        )
 
 
 @pytest.mark.asyncio
@@ -82,7 +93,15 @@ async def test_real_electricity_matches_authoritative_csv_fingerprints(socket_en
             key=lambda item: item[0],
         )
         assert first_rows
-        assert _hash_rows([first_rows[0]]) == contract["first_interval_sha256"]
+
+        failures: list[str] = []
+        first_hash = _hash_rows([first_rows[0]])
+        if first_hash != contract["first_interval_sha256"]:
+            _print_actuals("first interval mismatch", [first_rows[0]])
+            failures.append(
+                "first interval fingerprint mismatch: "
+                f"expected={contract['first_interval_sha256']} actual={first_hash}"
+            )
 
         cases = [
             contract["first_day"],
@@ -93,9 +112,8 @@ async def test_real_electricity_matches_authoritative_csv_fingerprints(socket_en
         assert len(contract["random_days"]) >= 5
 
         for case in cases:
-            local_day = first_local_day + timedelta(
-                days=int(case["offset_days_from_first_local_day"])
-            )
+            offset = int(case["offset_days_from_first_local_day"])
+            local_day = first_local_day + timedelta(days=offset)
             start = _local_midnight(local_day)
             end = _local_midnight(local_day + timedelta(days=1))
             raw_rows = await client.get_readings(resource_id, start, end)
@@ -111,5 +129,19 @@ async def test_real_electricity_matches_authoritative_csv_fingerprints(socket_en
                 key=lambda item: item[0],
             )
 
-            assert len(rows) == int(case["expected_interval_count"])
-            assert _hash_rows(rows) == case["sha256"]
+            expected_count = int(case["expected_interval_count"])
+            actual_hash = _hash_rows(rows)
+            if len(rows) != expected_count or actual_hash != case["sha256"]:
+                _print_actuals(
+                    f"golden offset={offset} local_day={local_day.isoformat()} "
+                    f"expected_count={expected_count} actual_count={len(rows)} "
+                    f"expected_hash={case['sha256']} actual_hash={actual_hash}",
+                    rows,
+                )
+                failures.append(
+                    f"offset {offset}: expected_count={expected_count} actual_count={len(rows)} "
+                    f"expected_hash={case['sha256']} actual_hash={actual_hash}"
+                )
+
+        if failures:
+            pytest.fail("Live CSV golden mismatches:\n" + "\n".join(failures))
