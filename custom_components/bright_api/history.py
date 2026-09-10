@@ -1,15 +1,16 @@
 """Resumable PT30M usage, cost and tariff history for Bright API."""
 from __future__ import annotations
 
+import asyncio
 import logging
 from collections import defaultdict
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime, time, timedelta
 from typing import Any
 
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.storage import Store
 
-from .api import BrightApiClient, BrightApiError
+from .api import UK_TZ, BrightApiClient, BrightApiError
 from .const import (
     CLASSIFIER_ELECTRICITY_CONSUMPTION,
     CLASSIFIER_ELECTRICITY_COST,
@@ -23,6 +24,7 @@ _LOGGER = logging.getLogger(__name__)
 HISTORY_STORAGE_VERSION = 1
 HISTORY_SCHEMA_VERSION = 1
 HISTORY_CHUNK_DAYS = 9
+HISTORY_REFRESH_LOCAL_TIME = time(4, 0)
 
 COMMODITIES: dict[str, tuple[str, str]] = {
     "electricity": (
@@ -49,10 +51,23 @@ def _parse_utc(value: str) -> datetime:
     return parsed.astimezone(UTC)
 
 
-def _floor_half_hour(value: datetime) -> datetime:
-    """Return the exclusive boundary after the latest completed PT30M interval."""
-    value = value.astimezone(UTC).replace(second=0, microsecond=0)
-    return value.replace(minute=30 if value.minute >= 30 else 0)
+def _latest_settled_boundary(value: datetime) -> datetime:
+    """Return the latest UTC midnight considered settled after 04:00 UK time."""
+    local = value.astimezone(UK_TZ)
+    settled_date = local.date()
+    if local.timetz().replace(tzinfo=None) < HISTORY_REFRESH_LOCAL_TIME:
+        settled_date -= timedelta(days=1)
+    return datetime(settled_date.year, settled_date.month, settled_date.day, tzinfo=UTC)
+
+
+def _next_refresh_utc(value: datetime) -> datetime:
+    """Return the next 04:00 Europe/London refresh instant in UTC."""
+    local = value.astimezone(UK_TZ)
+    candidate = datetime.combine(local.date(), HISTORY_REFRESH_LOCAL_TIME, tzinfo=UK_TZ)
+    if local >= candidate:
+        next_day = local.date() + timedelta(days=1)
+        candidate = datetime.combine(next_day, HISTORY_REFRESH_LOCAL_TIME, tzinfo=UK_TZ)
+    return candidate.astimezone(UTC)
 
 
 def _month_key(value: datetime) -> str:
@@ -195,18 +210,13 @@ async def _first_interval(
     client: BrightApiClient,
     resources: dict[str, dict[str, Any]],
     usage_classifier: str,
-    cost_classifier: str,
 ) -> datetime | None:
-    """Return the earliest actual PT30M row exposed by usage or cost."""
-    candidates: list[datetime] = []
-    for classifier in (usage_classifier, cost_classifier):
-        resource = resources.get(classifier)
-        if resource is None:
-            continue
-        first = await client.get_first_available_reading_time(resource["resource_id"])
-        if first is not None:
-            candidates.append(first.astimezone(UTC))
-    return min(candidates) if candidates else None
+    """Return the first actual PT30M usage row; cost never defines history start."""
+    resource = resources.get(usage_classifier)
+    if resource is None:
+        return None
+    first = await client.get_first_available_reading_time(resource["resource_id"])
+    return first.astimezone(UTC) if first is not None else None
 
 
 async def _fetch_records(
@@ -234,6 +244,27 @@ async def _fetch_records(
     return _merge_rows(usage_rows, cost_rows, start, end)
 
 
+def _history_due(
+    metadata: dict[str, Any],
+    resources: dict[str, dict[str, Any]],
+    target_end: datetime,
+) -> bool:
+    """Return whether any supported usage ledger is behind the settled boundary."""
+    states = metadata.get("commodities")
+    if not isinstance(states, dict):
+        return True
+
+    for commodity, (usage_classifier, _cost_classifier) in COMMODITIES.items():
+        if usage_classifier not in resources:
+            continue
+        state = states.get(commodity)
+        if not isinstance(state, dict) or not state.get("cursor_utc"):
+            return True
+        if _parse_utc(state["cursor_utc"]) < target_end:
+            return True
+    return False
+
+
 async def async_populate_interval_history(
     hass: HomeAssistant,
     client: BrightApiClient,
@@ -242,17 +273,21 @@ async def async_populate_interval_history(
     *,
     now_utc: datetime | None = None,
 ) -> dict[str, Any]:
-    """Populate or resume raw PT30M history to the latest completed interval."""
-    target_end = _floor_half_hour(now_utc or datetime.now(UTC))
+    """Populate or resume raw PT30M history to the latest settled UTC boundary."""
+    now = now_utc or datetime.now(UTC)
+    target_end = _latest_settled_boundary(now)
     repository = IntervalHistoryStore(hass, entry_id)
     metadata = await repository.async_load_metadata()
     commodities = metadata.setdefault("commodities", {})
 
     for commodity, (usage_classifier, cost_classifier) in COMMODITIES.items():
-        if usage_classifier not in resources and cost_classifier not in resources:
+        if usage_classifier not in resources:
             continue
 
         state = commodities.setdefault(commodity, {})
+        existing_cursor = _parse_utc(state["cursor_utc"]) if state.get("cursor_utc") else None
+        if existing_cursor is not None and existing_cursor >= target_end:
+            continue
 
         cost_resource = resources.get(cost_classifier)
         if cost_resource is not None:
@@ -263,12 +298,7 @@ async def async_populate_interval_history(
         first = (
             _parse_utc(state["first_interval"])
             if state.get("first_interval")
-            else await _first_interval(
-                client,
-                resources,
-                usage_classifier,
-                cost_classifier,
-            )
+            else await _first_interval(client, resources, usage_classifier)
         )
         if first is None:
             state["status"] = "no_data"
@@ -276,7 +306,7 @@ async def async_populate_interval_history(
             continue
 
         state["first_interval"] = _utc_iso(first)
-        cursor = _parse_utc(state["cursor_utc"]) if state.get("cursor_utc") else first
+        cursor = existing_cursor or first
         cursor = max(cursor, first)
 
         while cursor < target_end:
@@ -322,8 +352,25 @@ async def async_interval_history_worker(
     resources: dict[str, dict[str, Any]],
     entry_id: str,
 ) -> None:
-    """Run one non-blocking resumable history population pass."""
-    try:
-        await async_populate_interval_history(hass, client, resources, entry_id)
-    except BrightApiError as err:
-        _LOGGER.warning("Bright interval history population paused: %s", err)
+    """Backfill when needed, then refresh settled history once daily at 04:00 UK time."""
+    repository = IntervalHistoryStore(hass, entry_id)
+
+    while True:
+        now = datetime.now(UTC)
+        metadata = await repository.async_load_metadata()
+        target_end = _latest_settled_boundary(now)
+
+        if _history_due(metadata, resources, target_end):
+            try:
+                await async_populate_interval_history(
+                    hass,
+                    client,
+                    resources,
+                    entry_id,
+                    now_utc=now,
+                )
+            except BrightApiError as err:
+                _LOGGER.warning("Bright interval history population paused: %s", err)
+
+        next_refresh = _next_refresh_utc(now)
+        await asyncio.sleep(max(1.0, (next_refresh - datetime.now(UTC)).total_seconds()))
