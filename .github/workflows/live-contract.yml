@@ -26,6 +26,13 @@ jobs:
           python-version: "3.14"
           cache: pip
           cache-dependency-path: requirements-dev.txt
+      - name: Require protected credentials
+        env:
+          GLOWMARKT_USERNAME: ${{ secrets.GLOWMARKT_USERNAME }}
+          GLOWMARKT_PASSWORD: ${{ secrets.GLOWMARKT_PASSWORD }}
+        run: |
+          test -n "$GLOWMARKT_USERNAME" || { echo "GLOWMARKT_USERNAME is not configured"; exit 1; }
+          test -n "$GLOWMARKT_PASSWORD" || { echo "GLOWMARKT_PASSWORD is not configured"; exit 1; }
       - name: Install test dependencies
         run: python -m pip install -r requirements-dev.txt
       - name: Lint protected contract
