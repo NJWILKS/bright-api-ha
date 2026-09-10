@@ -24,6 +24,8 @@ from custom_components.bright_api.history import (
 pytestmark = pytest.mark.live
 
 GOLDEN = Path(__file__).parents[1] / "tests" / "fixtures" / "electricity_golden_hashes.json"
+KNOWN_FIRST_CSV_UTC = datetime(2025, 7, 29, 23, 0, tzinfo=UTC)
+LOCATOR_TOLERANCE = timedelta(days=3)
 USAGE_COST_TOLERANCE_PENCE = 5.0
 TOTAL_COST_TOLERANCE_PENCE = 15.0
 STANDING_TOLERANCE_PENCE = 15.0
@@ -150,8 +152,7 @@ def _tariff_for_day(
 async def _known_electricity(
     client: BrightApiClient,
 ) -> tuple[dict[str, dict[str, Any]], datetime]:
-    """Find the electricity site by matching the CSV-derived first-interval fingerprint."""
-    expected = _golden()["first_interval_sha256"]
+    """Find the known electricity site using the proven first-time locator rule."""
     virtual_entities = await client.get_virtual_entities()
     assert virtual_entities, "Live contract: no Bright virtual entities were returned"
 
@@ -165,17 +166,19 @@ async def _known_electricity(
         if usage is None or cost is None:
             continue
 
-        first = await client.get_first_available_reading_time(usage["resource_id"])
-        if first is None:
+        locator = await client.get_first_reading_time(usage["resource_id"])
+        if locator is None or abs(locator - KNOWN_FIRST_CSV_UTC) > LOCATOR_TOLERANCE:
             continue
-        first_rows = await client.get_readings(
-            usage["resource_id"], first, first + timedelta(minutes=30)
-        )
-        first_exact = [(timestamp, value) for timestamp, value in first_rows if timestamp == first]
-        if _canonical_hash(first_exact) == expected:
+        first = await client.get_first_available_reading_time(usage["resource_id"])
+        if first is not None:
+            print(
+                "LIVE DIAGNOSTIC selected site: "
+                f"locator={locator.astimezone(UTC).isoformat()} "
+                f"first_actual={first.astimezone(UTC).isoformat()}"
+            )
             return resources, first
 
-    pytest.fail("Live contract: no electricity site matched the golden first interval")
+    pytest.fail("Live contract: known electricity site not found near CSV start locator")
 
 
 @pytest.mark.asyncio
@@ -191,6 +194,7 @@ async def test_live_pt30m_matches_csv_golden_and_cost_identity(socket_enabled) -
         cost_id = resources[CLASSIFIER_ELECTRICITY_COST]["resource_id"]
         first_local_day = first.astimezone(UK_TZ).date()
 
+        failures: list[str] = []
         cases = [golden["first_day"], *golden["random_days"], *golden["dst_days"]]
         cases.append(golden["last_known_complete_day"])
         day_rows: dict[int, list[tuple[datetime, float | None]]] = {}
@@ -200,17 +204,20 @@ async def test_live_pt30m_matches_csv_golden_and_cost_identity(socket_enabled) -
             day = first_local_day + timedelta(days=offset)
             start, end = _local_day_window(day)
             rows = _window_rows(await client.get_readings(usage_id, start, end), start, end)
-            assert len(rows) == int(case["expected_interval_count"]), (
-                f"Live contract: PT30M interval count mismatch for golden offset {offset}"
-            )
-            assert _canonical_hash(rows) == case["sha256"], (
-                f"Live contract: PT30M timestamp/value mismatch for golden offset {offset}"
-            )
             day_rows[offset] = rows
+            expected_count = int(case["expected_interval_count"])
+            actual_hash = _canonical_hash(rows)
+            if len(rows) != expected_count or actual_hash != case["sha256"]:
+                failures.append(
+                    f"PT30M golden offset {offset}: expected_count={expected_count} "
+                    f"actual_count={len(rows)} expected_hash={case['sha256']} "
+                    f"actual_hash={actual_hash}"
+                )
 
         tariff_rows = await client.get_tariffs(cost_id)
         tariffs = _flat_tariff_rows(tariff_rows)
-        assert tariffs, "Live contract: no explicit flat tariff with unit rate and standing charge"
+        if not tariffs:
+            pytest.fail("Live contract: no explicit flat tariff with unit rate and standing charge")
 
         # Cost contract: first day + five fixed random days + last known good day.
         cost_cases = [golden["first_day"], *golden["random_days"]]
@@ -220,9 +227,9 @@ async def test_live_pt30m_matches_csv_golden_and_cost_identity(socket_enabled) -
             day = first_local_day + timedelta(days=offset)
             start, end = _local_day_window(day)
             tariff = _tariff_for_day(tariffs, day)
-            assert tariff is not None, (
-                f"Live contract: no explicit tariff evidence for golden offset {offset}"
-            )
+            if tariff is None:
+                failures.append(f"no explicit tariff evidence for golden offset {offset}")
+                continue
             unit_rate, standing = tariff
 
             usage_rows = day_rows[offset]
@@ -238,25 +245,31 @@ async def test_live_pt30m_matches_csv_golden_and_cost_identity(socket_enabled) -
             p1d_cost_rows = _window_rows(
                 await client.get_readings(cost_id, start, end, period="P1D"), start, end
             )
-            assert pt30m_cost_rows, (
-                f"Live contract: Bright PT30M cost missing for golden offset {offset}"
-            )
-            assert p1d_cost_rows, (
-                f"Live contract: Bright P1D cost missing for golden offset {offset}"
-            )
+            if not pt30m_cost_rows or not p1d_cost_rows:
+                failures.append(f"cost aggregation data missing for golden offset {offset}")
+                continue
 
             b_pt30m_cost = sum(float(value) for _, value in pt30m_cost_rows if value is not None)
             c_p1d_cost = sum(float(value) for _, value in p1d_cost_rows if value is not None)
+            standing_residual = c_p1d_cost - b_pt30m_cost
 
-            assert abs(a_usage_priced - b_pt30m_cost) <= USAGE_COST_TOLERANCE_PENCE, (
-                f"Live contract: A != B for golden offset {offset}"
+            print(
+                "LIVE COST DIAGNOSTIC: "
+                f"offset={offset} day={day.isoformat()} unit_rate={unit_rate:.12g} "
+                f"standing={standing:.12g} A={a_usage_priced:.12g} "
+                f"B={b_pt30m_cost:.12g} C={c_p1d_cost:.12g} "
+                f"C_minus_B={standing_residual:.12g}"
             )
-            assert abs((a_usage_priced + standing) - c_p1d_cost) <= TOTAL_COST_TOLERANCE_PENCE, (
-                f"Live contract: A + S != C for golden offset {offset}"
-            )
-            assert abs((c_p1d_cost - b_pt30m_cost) - standing) <= STANDING_TOLERANCE_PENCE, (
-                f"Live contract: C - B != S for golden offset {offset}"
-            )
+
+            if abs(a_usage_priced - b_pt30m_cost) > USAGE_COST_TOLERANCE_PENCE:
+                failures.append(f"A != B for golden offset {offset}")
+            if abs((a_usage_priced + standing) - c_p1d_cost) > TOTAL_COST_TOLERANCE_PENCE:
+                failures.append(f"A + S != C for golden offset {offset}")
+            if abs(standing_residual - standing) > STANDING_TOLERANCE_PENCE:
+                failures.append(f"C - B != S for golden offset {offset}")
+
+        if failures:
+            pytest.fail("Live contract mismatches:\n" + "\n".join(failures))
 
 
 @pytest.mark.asyncio
