@@ -33,7 +33,7 @@ def _credentials() -> tuple[str, str]:
     username = os.environ.get("GLOWMARKT_USERNAME")
     password = os.environ.get("GLOWMARKT_PASSWORD")
     if not username or not password:
-        pytest.skip("Protected Bright credentials are not configured")
+        pytest.fail("Protected Bright credentials are not configured")
     return username, password
 
 
