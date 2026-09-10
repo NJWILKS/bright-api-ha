@@ -11,6 +11,8 @@ This repository is a clean implementation, not a migration of the previous Hilde
 - Keep history population asynchronous, resumable and idempotent.
 - Use UTC timestamps as interval identity; use Europe/London only for local billing-day and tariff semantics.
 - Do not make historical population depend on entity IDs.
+- Do not expose the Bright cumulative meter reading as a Home Assistant entity or statistic. Historical truth is the settled PT30M series, not an unverifiable cumulative total.
+- After initial backfill is complete, do not continuously poll historical PT30M data. Run one scheduled historical refresh cycle at 04:00 Europe/London for newly settled data. Because Bright endpoints are resource-specific, one refresh cycle may require one HTTP request per relevant resource; the non-negotiable is one daily history-sync cycle, not one literal HTTP request across all resources.
 - Do not add migration, legacy cleanup or compatibility state machines unless a future explicit requirement demands them.
 
 ## Non-negotiable acceptance contract
@@ -22,6 +24,8 @@ These requirements are release gates. A change that breaks any one of them must 
 3. Effective unit prices and standing charges obtained from the Bright API must correlate with the tariff values evidenced by the authoritative export/reference data for the same effective period.
 4. For each Europe/London billing day, derived total cost must equal the sum of each PT30M usage interval multiplied by the effective unit price for that interval, plus exactly one applicable daily standing charge. Flat, time-of-use and dynamic tariff handling must never silently substitute a different arithmetic model.
 5. The data model must remain capable of exposing historical usage-cost and standing-charge series separately so Home Assistant can render a daily stacked cost chart whose combined bar height is total daily cost. Total cost may also be exposed separately for Energy compatibility, but must not be required as a third stacked component.
+6. Bright cumulative meter totals must never be exposed to Home Assistant. No entity, statistic, Energy source or derived correctness check may depend on that cumulative reading.
+7. Once backfill is current, historical PT30M ingestion must settle into one daily refresh cycle at 04:00 Europe/London rather than continual historical polling. The refresh must ingest only newly settled intervals and remain restart-safe and idempotent.
 
 The authoritative CSV-derived expectations should be represented by a small sanitised golden fixture or protected contract test so they can run repeatedly without committing credentials, resource IDs, account identifiers, or unnecessary household data.
 
@@ -33,4 +37,4 @@ The authoritative CSV-derived expectations should be represented by a small sani
 - Preserve Home Assistant async/non-blocking behaviour.
 - Keep Recorder/statistics projection downstream of the raw ledger.
 - Do not publish a release until the exact candidate SHA has passed normal CI and the relevant protected live contract.
-- Any change touching first-reading discovery, PT30M retrieval, tariff parsing, cost arithmetic or statistics projection must explicitly prove the relevant non-negotiable acceptance criteria above.
+- Any change touching first-reading discovery, PT30M retrieval, tariff parsing, cost arithmetic, statistics projection or history scheduling must explicitly prove the relevant non-negotiable acceptance criteria above.
