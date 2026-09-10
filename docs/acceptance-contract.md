@@ -74,8 +74,33 @@ Home Assistant must therefore be able to display a daily stacked chart with **us
 - Home Assistant statistics integration test proving both series can be queried historically.
 - Real HA acceptance showing a daily stacked chart can be configured from those series.
 
+## 6. No cumulative meter total in Home Assistant
+
+The Bright cumulative meter reading is not part of the Home Assistant contract and must never be exposed as an entity, long-term statistic, Energy source or correctness baseline.
+
+The integration's historical truth is the settled PT30M interval series. A cumulative meter total that cannot be independently reconciled during the current day is not useful evidence and must not leak into presentation or projection code.
+
+**Required evidence**
+
+- Entity/statistics tests assert that no cumulative-total entity or statistic is created.
+- Projection code accepts interval data, not a cumulative meter total.
+
+## 7. Post-backfill history cadence
+
+Initial backfill may make multiple bounded requests until the ledger is current. Once current, historical PT30M ingestion must switch to one scheduled refresh cycle at **04:00 Europe/London** each day.
+
+The daily refresh ingests only newly settled intervals. It must be restart-safe and idempotent. It must not repeatedly poll historical readings throughout the day.
+
+Bright resource APIs are resource-specific, so a single scheduled refresh cycle can contain one request per relevant resource. The requirement is one daily history-sync cycle, not one literal HTTP request for all commodities/resources.
+
+**Required evidence**
+
+- Scheduler test proving the next run resolves to 04:00 Europe/London across BST/GMT transitions.
+- Test proving a current ledger requests only the un-ingested settled range.
+- Restart test proving a missed/duplicated scheduler invocation cannot duplicate intervals.
+
 ## Golden data policy
 
 The original household export must not be committed wholesale to the public repository. Instead, derive a minimal sanitised fixture containing only the timestamps, PT30M values, tariff values and daily expected totals necessary to prove this contract. Do not commit credentials, tokens, account identifiers, resource IDs, addresses or unrelated household history.
 
-Any PR touching first-reading discovery, PT30M retrieval, tariff interpretation, cost arithmetic or Home Assistant statistics must identify which contract sections it affects and show the corresponding tests passing before merge.
+Any PR touching first-reading discovery, PT30M retrieval, tariff interpretation, cost arithmetic, Home Assistant statistics or history scheduling must identify which contract sections it affects and show the corresponding tests passing before merge.
