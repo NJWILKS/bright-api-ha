@@ -8,9 +8,9 @@ The first interval accepted by the integration must be the first actual non-null
 
 **Required evidence**
 
-- Golden-data test against a sanitised extract derived from an authoritative Bright export CSV.
+- Golden-data test derived from an authoritative Bright export CSV.
 - Protected live contract against the real API.
-- The timestamp must match the CSV's first actual PT30M interval.
+- The first actual interval must match the CSV-derived golden fingerprint exactly.
 
 ## 2. PT30M fidelity
 
@@ -18,10 +18,16 @@ PT30M timestamps and values are canonical historical usage data.
 
 **Required evidence**
 
-- Golden-data comparison against the authoritative Bright export CSV.
-- Genuine `0.0` readings remain `0.0`, not missing/null.
-- UTC timestamp identity is preserved through UK DST changes; local duplicate clock times must remain distinct instants.
-- No interpolation or synthetic filling is allowed in the raw ledger.
+Every protected live acceptance run must compare complete PT30M days against CSV-derived golden fingerprints for:
+
+- the first complete billing day in the export;
+- at least five randomly selected complete billing days, selected once with a recorded deterministic seed and then fixed as regression cases;
+- the last known complete/good billing day in the export;
+- known UK DST transition days where present in the export.
+
+For every selected day, both timestamps and values must match. Genuine `0.0` readings remain `0.0`, UTC timestamp identity is preserved through UK DST changes, and no interpolation or synthetic filling is allowed in the raw ledger.
+
+To avoid publishing household interval data, the repository stores SHA-256 fingerprints of canonically normalised complete days rather than the raw export rows. The original export itself is not committed.
 
 ## 3. Tariff fidelity
 
@@ -29,9 +35,11 @@ Unit prices and standing charges must come from Bright tariff API evidence and m
 
 **Required evidence**
 
-- Golden-data comparison against tariff values evidenced by the authoritative export/reference data.
+- Golden/reference comparison against independently evidenced tariff values for the same effective period.
 - Tests for tariff changes at an effective-date boundary.
 - Raw tariff evidence is stored separately from interval facts.
+
+A consumption-only CSV cannot prove tariff values by itself; tariff acceptance therefore requires tariff-bearing export/reference evidence in addition to the consumption golden fixture.
 
 ## 4. Daily cost identity
 
@@ -55,7 +63,7 @@ A tariff type that cannot be calculated from the available API evidence must rem
 **Required evidence**
 
 - Pure arithmetic unit tests.
-- Golden-data daily reconciliation against one or more known CSV days.
+- Golden-data daily reconciliation against independently evidenced tariff/cost data.
 - Tests spanning tariff changes and DST transitions.
 
 ## 5. Home Assistant presentation capability
@@ -101,6 +109,6 @@ Bright resource APIs are resource-specific, so a single scheduled refresh cycle 
 
 ## Golden data policy
 
-The original household export must not be committed wholesale to the public repository. Instead, derive a minimal sanitised fixture containing only the timestamps, PT30M values, tariff values and daily expected totals necessary to prove this contract. Do not commit credentials, tokens, account identifiers, resource IDs, addresses or unrelated household history.
+The original household export must not be committed wholesale to the public repository. The repository may contain non-reversible fingerprints and structural expectations such as interval counts and relative day offsets. It must not contain credentials, tokens, account identifiers, resource IDs, addresses or raw household interval history.
 
 Any PR touching first-reading discovery, PT30M retrieval, tariff interpretation, cost arithmetic, Home Assistant statistics or history scheduling must identify which contract sections it affects and show the corresponding tests passing before merge.
