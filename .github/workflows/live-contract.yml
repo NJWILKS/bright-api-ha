@@ -1,0 +1,44 @@
+name: Live Bright contract
+
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: Exact commit SHA to validate
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  live:
+    name: Protected Bright API contract
+    runs-on: ubuntu-latest
+    environment: glow-live
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.ref }}
+          persist-credentials: false
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.14"
+          cache: pip
+          cache-dependency-path: requirements-dev.txt
+      - name: Require protected credentials
+        env:
+          GLOWMARKT_USERNAME: ${{ secrets.GLOWMARKT_USERNAME }}
+          GLOWMARKT_PASSWORD: ${{ secrets.GLOWMARKT_PASSWORD }}
+        run: |
+          test -n "$GLOWMARKT_USERNAME" || { echo "GLOWMARKT_USERNAME is not configured"; exit 1; }
+          test -n "$GLOWMARKT_PASSWORD" || { echo "GLOWMARKT_PASSWORD is not configured"; exit 1; }
+      - name: Install test dependencies
+        run: python -m pip install -r requirements-dev.txt
+      - name: Lint protected contract
+        run: ruff check custom_components/bright_api tests live_tests
+      - name: Verify protected Bright contract
+        env:
+          GLOWMARKT_USERNAME: ${{ secrets.GLOWMARKT_USERNAME }}
+          GLOWMARKT_PASSWORD: ${{ secrets.GLOWMARKT_PASSWORD }}
+          PYTHONPATH: .
+        run: pytest --force-enable-socket -m live live_tests
