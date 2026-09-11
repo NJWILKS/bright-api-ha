@@ -1,6 +1,9 @@
 """Bright API Home Assistant integration."""
 from __future__ import annotations
 
+import asyncio
+from typing import Any
+
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import CONF_PASSWORD, CONF_USERNAME, Platform
 from homeassistant.core import HomeAssistant
@@ -10,8 +13,15 @@ from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from .api import BrightApiClient, BrightApiError, BrightAuthError
 from .const import CONF_VIRTUAL_ENTITY_ID, DOMAIN
 from .orchestrator import async_history_and_statistics_worker
+from .services import async_setup_services
 
 PLATFORMS: list[Platform] = [Platform.SENSOR]
+
+
+async def async_setup(hass: HomeAssistant, config: dict[str, Any]) -> bool:
+    """Set up integration-level services."""
+    async_setup_services(hass)
+    return True
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
@@ -27,9 +37,11 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     except (BrightApiError, BrightAuthError) as err:
         raise ConfigEntryNotReady(str(err)) from err
 
+    operation_lock = asyncio.Lock()
     hass.data.setdefault(DOMAIN, {})[entry.entry_id] = {
         "client": client,
         "resources": resources,
+        "operation_lock": operation_lock,
     }
 
     # Presentation entities only read the integration's durable Store data.
@@ -47,6 +59,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             client,
             resources,
             entry.entry_id,
+            operation_lock,
         ),
         f"{DOMAIN} PT30M history and statistics",
     )
