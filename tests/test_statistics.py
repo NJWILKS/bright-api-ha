@@ -20,11 +20,11 @@ from custom_components.bright_api.statistics import (
 
 
 def test_hourly_projection_separates_usage_billed_total_and_standing() -> None:
-    start = datetime(2026, 9, 1, 0, 0, tzinfo=UTC)
-    end = datetime(2026, 9, 2, 0, 0, tzinfo=UTC)
+    start = datetime(2026, 8, 31, 23, 0, tzinfo=UTC)
+    end = datetime(2026, 9, 1, 23, 0, tzinfo=UTC)
     records = []
     for index in range(48):
-        timestamp = start + index * (end - start) / 48
+        timestamp = start + timedelta(minutes=30 * index)
         records.append(
             {
                 "timestamp": timestamp.isoformat(),
@@ -53,11 +53,11 @@ def test_hourly_projection_separates_usage_billed_total_and_standing() -> None:
 
 
 def test_standing_is_not_derived_when_pt30m_cost_day_is_incomplete() -> None:
-    start = datetime(2026, 9, 1, 0, 0, tzinfo=UTC)
-    end = datetime(2026, 9, 2, 0, 0, tzinfo=UTC)
+    start = datetime(2026, 8, 31, 23, 0, tzinfo=UTC)
+    end = datetime(2026, 9, 1, 23, 0, tzinfo=UTC)
     records = [
         {
-            "timestamp": (start + index * (end - start) / 48).isoformat(),
+            "timestamp": (start + timedelta(minutes=30 * index)).isoformat(),
             "usage_kwh": 0.1,
             "cost_pence": 0.5,
         }
@@ -116,7 +116,8 @@ def test_owned_statistics_never_include_a_cumulative_meter_total() -> None:
 async def test_projection_checkpoint_advances_only_after_recorder_finishes(hass) -> None:
     entry_id = "entry-1"
     history = IntervalHistoryStore(hass, entry_id)
-    start = datetime(2026, 9, 1, 0, 0, tzinfo=UTC)
+    start = datetime(2026, 8, 31, 23, 0, tzinfo=UTC)
+    end = datetime(2026, 9, 1, 23, 0, tzinfo=UTC)
     records = [
         {
             "timestamp": (start + timedelta(minutes=30 * index)).isoformat(),
@@ -128,14 +129,14 @@ async def test_projection_checkpoint_advances_only_after_recorder_finishes(hass)
     await history.async_upsert_intervals("electricity", records)
     await history.async_upsert_daily_costs(
         "electricity",
-        [(datetime(2026, 9, 1, 0, 0, tzinfo=UTC), 74.0)],
+        [(start, 74.0)],
     )
     metadata = {
         "schema_version": 1,
         "commodities": {
             "electricity": {
-                "first_interval": "2026-09-01T00:00:00+00:00",
-                "cursor_utc": "2026-09-02T00:00:00+00:00",
+                "first_interval": start.isoformat(),
+                "cursor_utc": end.isoformat(),
                 "daily_cost_cursor_day": "2026-09-02",
                 "status": "current",
             }
@@ -152,7 +153,7 @@ async def test_projection_checkpoint_advances_only_after_recorder_finishes(hass)
 
         recorder.async_block_till_done.assert_awaited_once()
         assert add_stats.call_count == 4
-        assert state["commodities"]["electricity"]["cursor_utc"] == "2026-09-02T00:00:00+00:00"
+        assert state["commodities"]["electricity"]["cursor_utc"] == end.isoformat()
 
         add_stats.reset_mock()
         recorder.async_block_till_done.reset_mock()
