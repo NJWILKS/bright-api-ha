@@ -47,7 +47,11 @@ async def async_clear_interval_history(hass: HomeAssistant, entry_id: str) -> No
         state = commodity_states.get(commodity, {})
         if isinstance(state, dict) and state.get("first_interval"):
             start = _parse_utc(str(state["first_interval"]))
-            end_raw = state.get("cursor_utc") or state.get("last_interval") or state["first_interval"]
+            end_raw = (
+                state.get("cursor_utc")
+                or state.get("last_interval")
+                or state["first_interval"]
+            )
             end = _parse_utc(str(end_raw))
             for month in _month_keys(start, end):
                 await Store(
