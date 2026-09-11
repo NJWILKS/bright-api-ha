@@ -31,6 +31,13 @@ async def test_clear_interval_history_removes_only_owned_store_data(hass) -> Non
         "cost_pence": 7.2,
     }
     await repository.async_upsert_intervals("electricity", [january, february])
+    await repository.async_upsert_daily_costs(
+        "electricity",
+        [
+            (datetime(2026, 1, 31, tzinfo=UTC), 55.0),
+            (datetime(2026, 2, 1, tzinfo=UTC), 56.0),
+        ],
+    )
     await repository.async_save_tariffs(
         "electricity",
         [{"effectiveDate": "2026-01-01 00:00:00"}],
@@ -44,6 +51,7 @@ async def test_clear_interval_history_removes_only_owned_store_data(hass) -> Non
                     "first_interval": january["timestamp"],
                     "last_interval": february["timestamp"],
                     "cursor_utc": "2026-02-02T00:00:00+00:00",
+                    "daily_cost_cursor_day": "2026-02-02",
                     "status": "current",
                 }
             },
@@ -52,6 +60,10 @@ async def test_clear_interval_history_removes_only_owned_store_data(hass) -> Non
 
     other = IntervalHistoryStore(hass, "entry-2")
     await other.async_upsert_intervals("electricity", [january])
+    await other.async_upsert_daily_costs(
+        "electricity",
+        [(datetime(2026, 1, 31, tzinfo=UTC), 99.0)],
+    )
     await other.async_save_metadata(
         {
             "schema_version": 1,
@@ -59,6 +71,7 @@ async def test_clear_interval_history_removes_only_owned_store_data(hass) -> Non
                 "electricity": {
                     "first_interval": january["timestamp"],
                     "cursor_utc": "2026-02-01T00:00:00+00:00",
+                    "daily_cost_cursor_day": "2026-02-01",
                 }
             },
         }
@@ -68,10 +81,13 @@ async def test_clear_interval_history_removes_only_owned_store_data(hass) -> Non
 
     assert await repository.async_load_month("electricity", "2026-01") == {}
     assert await repository.async_load_month("electricity", "2026-02") == {}
+    assert await repository.async_load_daily_cost_month("electricity", "2026-01") == {}
+    assert await repository.async_load_daily_cost_month("electricity", "2026-02") == {}
     assert await repository.async_load_tariffs("electricity") == {}
     assert (await repository.async_load_metadata())["commodities"] == {}
 
     assert await other.async_load_month("electricity", "2026-01")
+    assert await other.async_load_daily_cost_month("electricity", "2026-01")
     assert (await other.async_load_metadata())["commodities"]["electricity"]
 
 

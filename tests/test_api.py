@@ -5,12 +5,65 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from custom_components.bright_api.api import BrightApiClient
+from custom_components.bright_api.api import BrightApiClient, BrightAuthError
 
 
 @pytest.fixture
 def client() -> BrightApiClient:
     return BrightApiClient("user@example.com", "secret", object())  # type: ignore[arg-type]
+
+
+class _Response:
+    def __init__(self, status: int, payload=None) -> None:
+        self.status = status
+        self._payload = payload
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, exc_type, exc, tb) -> None:
+        return None
+
+    async def json(self):
+        return self._payload
+
+
+class _Session:
+    def __init__(self, responses: list[_Response]) -> None:
+        self.responses = responses
+        self.get_calls = 0
+
+    def get(self, *args, **kwargs):
+        del args, kwargs
+        response = self.responses[self.get_calls]
+        self.get_calls += 1
+        return response
+
+
+@pytest.mark.asyncio
+async def test_expired_session_reauthenticates_once() -> None:
+    session = _Session([_Response(401), _Response(200, {"ok": True})])
+    client = BrightApiClient("user@example.com", "secret", session)  # type: ignore[arg-type]
+    client._token = "expired"
+    client.authenticate = AsyncMock()  # type: ignore[method-assign]
+
+    assert await client._get_json("/resource/test") == {"ok": True}
+    client.authenticate.assert_awaited_once()
+    assert session.get_calls == 2
+
+
+@pytest.mark.asyncio
+async def test_repeated_401_after_reauthentication_fails() -> None:
+    session = _Session([_Response(401), _Response(401)])
+    client = BrightApiClient("user@example.com", "secret", session)  # type: ignore[arg-type]
+    client._token = "expired"
+    client.authenticate = AsyncMock()  # type: ignore[method-assign]
+
+    with pytest.raises(BrightAuthError):
+        await client._get_json("/resource/test")
+
+    client.authenticate.assert_awaited_once()
+    assert session.get_calls == 2
 
 
 @pytest.mark.asyncio
