@@ -1,10 +1,10 @@
-"""Resumable PT30M usage, cost and tariff history for Bright API."""
+"""Resumable PT30M usage, cost, daily billing and tariff history for Bright API."""
 from __future__ import annotations
 
 import asyncio
 import logging
 from collections import defaultdict
-from datetime import UTC, datetime, time, timedelta
+from datetime import UTC, date, datetime, time, timedelta
 from typing import Any
 
 from homeassistant.core import HomeAssistant
@@ -18,6 +18,7 @@ from .const import (
     CLASSIFIER_GAS_COST,
     DOMAIN,
 )
+from .interval_semantics import canonical_pt30m_start
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -52,12 +53,13 @@ def _parse_utc(value: str) -> datetime:
 
 
 def _latest_settled_boundary(value: datetime) -> datetime:
-    """Return the latest UTC midnight considered settled after 04:00 UK time."""
+    """Return the latest settled Europe/London billing-day boundary in UTC."""
     local = value.astimezone(UK_TZ)
     settled_date = local.date()
     if local.timetz().replace(tzinfo=None) < HISTORY_REFRESH_LOCAL_TIME:
         settled_date -= timedelta(days=1)
-    return datetime(settled_date.year, settled_date.month, settled_date.day, tzinfo=UTC)
+    local_midnight = datetime.combine(settled_date, time.min, tzinfo=UK_TZ)
+    return local_midnight.astimezone(UTC)
 
 
 def _next_refresh_utc(value: datetime) -> datetime:
@@ -105,7 +107,7 @@ def _merge_rows(
 
 
 class IntervalHistoryStore:
-    """Persist small metadata plus bounded monthly interval files."""
+    """Persist small metadata plus bounded raw history files."""
 
     def __init__(self, hass: HomeAssistant, entry_id: str) -> None:
         self._hass = hass
@@ -130,6 +132,13 @@ class IntervalHistoryStore:
             f"{DOMAIN}_{self._entry_id}_tariffs_{commodity}",
         )
 
+    def _daily_cost_store(self, commodity: str, month: str) -> Store:
+        return Store(
+            self._hass,
+            HISTORY_STORAGE_VERSION,
+            f"{DOMAIN}_{self._entry_id}_daily_cost_{commodity}_{month.replace('-', '_')}",
+        )
+
     async def async_load_metadata(self) -> dict[str, Any]:
         """Load resumable history metadata."""
         state = await self._metadata_store.async_load() or {}
@@ -151,7 +160,7 @@ class IntervalHistoryStore:
         rows: list[dict[str, Any]],
         refreshed_at: datetime,
     ) -> None:
-        """Persist the API's effective-dated tariff rows separately from intervals."""
+        """Persist tariff rows separately from raw interval facts."""
         await self._tariff_store(commodity).async_save(
             {
                 "schema_version": HISTORY_SCHEMA_VERSION,
@@ -200,10 +209,55 @@ class IntervalHistoryStore:
         commodity: str,
         month: str,
     ) -> dict[str, dict[str, Any]]:
-        """Load interval rows for diagnostics and tests."""
+        """Load raw PT30M interval rows for diagnostics and projection."""
         state = await self._interval_store(commodity, month).async_load() or {}
         intervals = state.get("intervals", {})
         return intervals if isinstance(intervals, dict) else {}
+
+    async def async_upsert_daily_costs(
+        self,
+        commodity: str,
+        rows: list[tuple[datetime, float | None]],
+    ) -> None:
+        """Persist Bright P1D cost evidence by Europe/London billing day."""
+        grouped: dict[str, list[dict[str, Any]]] = defaultdict(list)
+        for timestamp, value in rows:
+            if value is None:
+                continue
+            billing_day = timestamp.astimezone(UK_TZ).date()
+            record = {
+                "timestamp": _utc_iso(timestamp),
+                "billing_day": billing_day.isoformat(),
+                "cost_pence": float(value),
+            }
+            grouped[f"{billing_day.year:04d}-{billing_day.month:02d}"].append(record)
+
+        for month, month_records in grouped.items():
+            store = self._daily_cost_store(commodity, month)
+            state = await store.async_load() or {}
+            days = state.get("days", {})
+            if not isinstance(days, dict):
+                days = {}
+            for record in month_records:
+                days[record["billing_day"]] = record
+            await store.async_save(
+                {
+                    "schema_version": HISTORY_SCHEMA_VERSION,
+                    "commodity": commodity,
+                    "month": month,
+                    "days": days,
+                }
+            )
+
+    async def async_load_daily_cost_month(
+        self,
+        commodity: str,
+        month: str,
+    ) -> dict[str, dict[str, Any]]:
+        """Load raw Bright P1D cost evidence for one local calendar month."""
+        state = await self._daily_cost_store(commodity, month).async_load() or {}
+        days = state.get("days", {})
+        return days if isinstance(days, dict) else {}
 
 
 async def _first_interval(
@@ -244,17 +298,53 @@ async def _fetch_records(
     return _merge_rows(usage_rows, cost_rows, start, end)
 
 
+async def _populate_daily_costs(
+    client: BrightApiClient,
+    repository: IntervalHistoryStore,
+    metadata: dict[str, Any],
+    state: dict[str, Any],
+    commodity: str,
+    cost_resource_id: str,
+    first_interval: datetime,
+    target_end: datetime,
+) -> None:
+    """Populate restart-safe Bright P1D billed totals on local-day boundaries."""
+    first_day = canonical_pt30m_start(first_interval).astimezone(UK_TZ).date()
+    target_day = target_end.astimezone(UK_TZ).date()
+    raw_cursor = state.get("daily_cost_cursor_day")
+    cursor_day = date.fromisoformat(str(raw_cursor)) if raw_cursor else first_day
+    cursor_day = max(cursor_day, first_day)
+
+    while cursor_day < target_day:
+        chunk_end_day = min(cursor_day + timedelta(days=HISTORY_CHUNK_DAYS), target_day)
+        start = datetime.combine(cursor_day, time.min, tzinfo=UK_TZ)
+        end = datetime.combine(chunk_end_day, time.min, tzinfo=UK_TZ)
+        rows = await client.get_readings(cost_resource_id, start, end, period="P1D")
+        rows = [
+            (timestamp, value)
+            for timestamp, value in rows
+            if cursor_day <= timestamp.astimezone(UK_TZ).date() < chunk_end_day
+        ]
+
+        # P1D evidence is durable before its independent cursor advances.
+        await repository.async_upsert_daily_costs(commodity, rows)
+        state["daily_cost_cursor_day"] = chunk_end_day.isoformat()
+        await repository.async_save_metadata(metadata)
+        cursor_day = chunk_end_day
+
+
 def _history_due(
     metadata: dict[str, Any],
     resources: dict[str, dict[str, Any]],
     target_end: datetime,
 ) -> bool:
-    """Return whether any supported usage ledger is behind the settled boundary."""
+    """Return whether any supported settled history is behind its boundary."""
     states = metadata.get("commodities")
     if not isinstance(states, dict):
         return True
 
-    for commodity, (usage_classifier, _cost_classifier) in COMMODITIES.items():
+    target_day = target_end.astimezone(UK_TZ).date()
+    for commodity, (usage_classifier, cost_classifier) in COMMODITIES.items():
         if usage_classifier not in resources:
             continue
         state = states.get(commodity)
@@ -262,6 +352,10 @@ def _history_due(
             return True
         if _parse_utc(state["cursor_utc"]) < target_end:
             return True
+        if cost_classifier in resources:
+            raw_daily_cursor = state.get("daily_cost_cursor_day")
+            if not raw_daily_cursor or date.fromisoformat(str(raw_daily_cursor)) < target_day:
+                return True
     return False
 
 
@@ -273,7 +367,7 @@ async def async_populate_interval_history(
     *,
     now_utc: datetime | None = None,
 ) -> dict[str, Any]:
-    """Populate or resume raw PT30M history to the latest settled UTC boundary."""
+    """Populate or resume raw PT30M and P1D history to the settled boundary."""
     now = now_utc or datetime.now(UTC)
     target_end = _latest_settled_boundary(now)
     repository = IntervalHistoryStore(hass, entry_id)
@@ -285,10 +379,6 @@ async def async_populate_interval_history(
             continue
 
         state = commodities.setdefault(commodity, {})
-        existing_cursor = _parse_utc(state["cursor_utc"]) if state.get("cursor_utc") else None
-        if existing_cursor is not None and existing_cursor >= target_end:
-            continue
-
         cost_resource = resources.get(cost_classifier)
         if cost_resource is not None:
             tariffs = await client.get_tariffs(cost_resource["resource_id"])
@@ -306,8 +396,8 @@ async def async_populate_interval_history(
             continue
 
         state["first_interval"] = _utc_iso(first)
-        cursor = existing_cursor or first
-        cursor = max(cursor, first)
+        existing_cursor = _parse_utc(state["cursor_utc"]) if state.get("cursor_utc") else None
+        cursor = max(existing_cursor or first, first)
 
         while cursor < target_end:
             chunk_end = min(cursor + timedelta(days=HISTORY_CHUNK_DAYS), target_end)
@@ -327,14 +417,27 @@ async def async_populate_interval_history(
             state["cursor_utc"] = _utc_iso(chunk_end)
             if records:
                 state["last_interval"] = records[-1]["timestamp"]
-            state["status"] = "current" if chunk_end >= target_end else "populating"
+            state["status"] = "populating"
             await repository.async_save_metadata(metadata)
             cursor = chunk_end
 
         if cursor >= target_end:
             state["cursor_utc"] = _utc_iso(target_end)
-            state["status"] = "current"
-            await repository.async_save_metadata(metadata)
+
+        if cost_resource is not None:
+            await _populate_daily_costs(
+                client,
+                repository,
+                metadata,
+                state,
+                commodity,
+                cost_resource["resource_id"],
+                first,
+                target_end,
+            )
+
+        state["status"] = "current"
+        await repository.async_save_metadata(metadata)
 
         _LOGGER.info(
             "Bright PT30M history for %s is %s through %s",
