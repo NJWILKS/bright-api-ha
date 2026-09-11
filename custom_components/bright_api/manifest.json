@@ -3,6 +3,7 @@
   "name": "Bright API",
   "codeowners": ["@NJWILKS"],
   "config_flow": true,
+  "dependencies": ["recorder"],
   "documentation": "https://github.com/NJWILKS/bright-api-ha",
   "integration_type": "hub",
   "iot_class": "cloud_polling",
