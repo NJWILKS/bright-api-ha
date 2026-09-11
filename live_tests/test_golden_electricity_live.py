@@ -111,6 +111,8 @@ async def test_real_electricity_matches_authoritative_csv_fingerprints(socket_en
         assert first_raw is not None
         first_canonical = canonical_pt30m_start(first_raw)
         first_local_day = first_canonical.astimezone(UK_TZ).date()
+        first_day_rows = await _canonical_day_rows(client, resource_id, first_local_day)
+        assert first_day_rows
 
         print(
             "LIVE DIAGNOSTIC selected resource: "
@@ -118,8 +120,7 @@ async def test_real_electricity_matches_authoritative_csv_fingerprints(socket_en
             f"first_canonical={first_canonical.isoformat()}"
         )
 
-        first_retrievable_hash = _hash_rows([(first_canonical, 0.203)])
-        assert first_retrievable_hash == gaps["first_retrievable_interval_sha256"]
+        assert _hash_rows([first_day_rows[0]]) == gaps["first_retrievable_interval_sha256"]
 
         failures: list[str] = []
         cases = [
@@ -133,7 +134,9 @@ async def test_real_electricity_matches_authoritative_csv_fingerprints(socket_en
         for case in cases:
             offset = int(case["offset_days_from_first_local_day"])
             local_day = first_local_day + timedelta(days=offset)
-            rows = await _canonical_day_rows(client, resource_id, local_day)
+            rows = first_day_rows if offset == 0 else await _canonical_day_rows(
+                client, resource_id, local_day
+            )
 
             if offset == 0:
                 expected_count = int(gaps["first_day_retrievable_count"])
