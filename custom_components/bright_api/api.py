@@ -68,18 +68,25 @@ class BrightApiClient:
         if self._token is None:
             await self.authenticate()
 
-        async with self._session.get(
-            f"{API_BASE}{path}",
-            headers=self.headers,
-            params=params,
-        ) as response:
-            if response.status == 401:
-                raise BrightAuthError("Bright session is no longer authorised")
-            if response.status == 404 and allow_not_found:
-                return None
-            if response.status >= 400:
-                raise BrightApiError(f"Bright request failed with HTTP {response.status}")
-            return await response.json()
+        for attempt in range(2):
+            async with self._session.get(
+                f"{API_BASE}{path}",
+                headers=self.headers,
+                params=params,
+            ) as response:
+                if response.status == 401:
+                    if attempt == 0:
+                        self._token = None
+                        await self.authenticate()
+                        continue
+                    raise BrightAuthError("Bright session is no longer authorised")
+                if response.status == 404 and allow_not_found:
+                    return None
+                if response.status >= 400:
+                    raise BrightApiError(f"Bright request failed with HTTP {response.status}")
+                return await response.json()
+
+        raise BrightAuthError("Bright session is no longer authorised")
 
     async def get_virtual_entities(self) -> list[dict[str, Any]]:
         payload = await self._get_json("/virtualentity")
