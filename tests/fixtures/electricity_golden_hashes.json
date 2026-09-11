@@ -1,9 +1,19 @@
 {
-  "schema_version": 1,
+  "schema_version": 2,
   "source_sha256": "e70bb156e644b0d340694e111715f82d14979834bebd100f29a6f6dd6760ebf4",
   "normalisation": "UTC_ISO_SECONDS|KWH_3DP joined with newline, SHA-256",
   "selection_seed": "bright-api-ha-golden-v1",
   "first_interval_sha256": "aad7acba3f5f6b150b85719664998cbb7d769bfa2973c86c1e71579de5b2bcf9",
+  "known_upstream_gaps": {
+    "leading_pt30m_intervals": 1,
+    "first_retrievable_interval_sha256": "70447fbd739931a345859bd708f9e67f275d11094dc2c26b8d0da1f7e92ffeff",
+    "first_day_retrievable_count": 47,
+    "first_day_retrievable_sha256": "23a2900db09732da78d3d88e70c30c9b38ed21e9dd74f68934c62dc6df536ee6",
+    "cutover_local_day": "2026-08-30",
+    "cutover_missing_intervals": 1,
+    "cutover_retrievable_count": 47,
+    "cutover_retrievable_sha256": "1d4be47b045cf80743fccb95304fc36815c849341b14f93c8f8e786ae0c936f5"
+  },
   "first_day": {
     "offset_days_from_first_local_day": 0,
     "expected_interval_count": 48,
