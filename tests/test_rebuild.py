@@ -6,9 +6,9 @@ from unittest.mock import AsyncMock
 
 import pytest
 
+from custom_components.bright_api import rebuild, services
 from custom_components.bright_api.const import DOMAIN
 from custom_components.bright_api.history import IntervalHistoryStore
-from custom_components.bright_api import rebuild, services
 from custom_components.bright_api.rebuild import async_clear_interval_history
 from custom_components.bright_api.services import (
     ATTR_ENTRY,
