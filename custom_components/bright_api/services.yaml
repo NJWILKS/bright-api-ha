@@ -1,0 +1,14 @@
+reset_rebuild:
+  name: Reset and rebuild Bright history
+  description: >-
+    Deletes only the selected Bright API entry's interval ledger, tariff cache,
+    projection checkpoint and external statistics, then refetches Bright history
+    from the first real PT30M interval and rebuilds Home Assistant statistics.
+  fields:
+    entry:
+      name: Bright configuration
+      description: The Bright API config entry to reset and rebuild.
+      required: true
+      selector:
+        config_entry:
+          integration: "bright_api"

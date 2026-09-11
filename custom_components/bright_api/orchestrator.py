@@ -9,7 +9,7 @@ from typing import Any
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.dispatcher import async_dispatcher_send
 
-from .api import BrightApiClient, BrightApiError
+from .api import BrightApiClient, BrightApiError, BrightAuthError
 from .const import DOMAIN
 from .history import (
     IntervalHistoryStore,
@@ -33,42 +33,45 @@ async def async_history_and_statistics_worker(
     client: BrightApiClient,
     resources: dict[str, dict[str, Any]],
     entry_id: str,
+    operation_lock: asyncio.Lock | None = None,
 ) -> None:
     """Populate settled history and project it once durable."""
     repository = IntervalHistoryStore(hass, entry_id)
+    lock = operation_lock or asyncio.Lock()
 
     while True:
-        now = datetime.now(UTC)
-        metadata = await repository.async_load_metadata()
-        target_end = _latest_settled_boundary(now)
+        async with lock:
+            now = datetime.now(UTC)
+            metadata = await repository.async_load_metadata()
+            target_end = _latest_settled_boundary(now)
 
-        if _history_due(metadata, resources, target_end):
+            if _history_due(metadata, resources, target_end):
+                try:
+                    metadata = await async_populate_interval_history(
+                        hass,
+                        client,
+                        resources,
+                        entry_id,
+                        now_utc=now,
+                    )
+                    async_dispatcher_send(hass, history_updated_signal(entry_id))
+                except (BrightApiError, BrightAuthError) as err:
+                    _LOGGER.warning("Bright interval history population paused: %s", err)
+
+            # Projection has its own checkpoint and is attempted even when the
+            # Bright ledger is already current. This closes the crash window where
+            # ledger writes completed but Recorder projection had not yet run.
             try:
-                metadata = await async_populate_interval_history(
+                await async_project_interval_history(
                     hass,
-                    client,
-                    resources,
                     entry_id,
-                    now_utc=now,
+                    history_metadata=metadata,
                 )
                 async_dispatcher_send(hass, history_updated_signal(entry_id))
-            except BrightApiError as err:
-                _LOGGER.warning("Bright interval history population paused: %s", err)
+            except StatisticsProjectionError as err:
+                # The ledger is already durable. A Recorder problem must never
+                # force another Bright backfill; projection can safely resume.
+                _LOGGER.warning("Bright statistics projection paused: %s", err)
 
-        # Projection has its own checkpoint and is attempted even when the
-        # Bright ledger is already current. This closes the crash window where
-        # ledger writes completed but Recorder projection had not yet run.
-        try:
-            await async_project_interval_history(
-                hass,
-                entry_id,
-                history_metadata=metadata,
-            )
-            async_dispatcher_send(hass, history_updated_signal(entry_id))
-        except StatisticsProjectionError as err:
-            # The ledger is already durable. A Recorder problem must never
-            # force another Bright backfill; projection can safely resume.
-            _LOGGER.warning("Bright statistics projection paused: %s", err)
-
-        next_refresh = _next_refresh_utc(now)
+        next_refresh = _next_refresh_utc(datetime.now(UTC))
         await asyncio.sleep(max(1.0, (next_refresh - datetime.now(UTC)).total_seconds()))
