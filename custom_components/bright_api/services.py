@@ -39,7 +39,11 @@ async def async_handle_reset_rebuild(call: ServiceCall) -> None:
     client = runtime.get("client")
     resources = runtime.get("resources")
     operation_lock = runtime.get("operation_lock")
-    if client is None or not isinstance(resources, dict) or not isinstance(operation_lock, asyncio.Lock):
+    if (
+        client is None
+        or not isinstance(resources, dict)
+        or not isinstance(operation_lock, asyncio.Lock)
+    ):
         raise ServiceValidationError("The selected Bright API config entry is not ready")
 
     async with operation_lock:
