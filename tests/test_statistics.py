@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import UTC, date, datetime
+from datetime import UTC, date, datetime, timedelta
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
@@ -119,7 +119,7 @@ async def test_projection_checkpoint_advances_only_after_recorder_finishes(hass)
     start = datetime(2026, 9, 1, 0, 0, tzinfo=UTC)
     records = [
         {
-            "timestamp": (start.replace(minute=0) + index * (datetime(2026, 9, 1, 0, 30, tzinfo=UTC) - start)).isoformat(),
+            "timestamp": (start + timedelta(minutes=30 * index)).isoformat(),
             "usage_kwh": 0.1,
             "cost_pence": 0.5,
         }
