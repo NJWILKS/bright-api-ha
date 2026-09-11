@@ -1,4 +1,4 @@
-"""Project the Bright PT30M ledger into Home Assistant external statistics."""
+"""Project the Bright raw ledger into Home Assistant external statistics."""
 from __future__ import annotations
 
 import re
@@ -21,7 +21,7 @@ from homeassistant.util.unit_conversion import EnergyConverter
 from .api import UK_TZ
 from .const import DOMAIN
 from .history import IntervalHistoryStore, _parse_utc
-from .tariffs import FlatTariff, parse_flat_tariffs, tariff_for_day
+from .interval_semantics import canonical_pt30m_start
 
 PROJECTION_STORAGE_VERSION = 1
 PROJECTION_SCHEMA_VERSION = 1
@@ -64,8 +64,8 @@ def owned_statistic_ids(entry_id: str) -> list[str]:
 
 
 def _hour_start(value: datetime) -> datetime:
-    """Map a raw Bright timestamp to its deterministic UTC statistics hour."""
-    return value.astimezone(UTC).replace(minute=0, second=0, microsecond=0)
+    """Map a raw Bright PT30M label to its canonical UTC statistics hour."""
+    return canonical_pt30m_start(value).replace(minute=0, second=0, microsecond=0)
 
 
 def _series_metadata(
@@ -92,38 +92,29 @@ def _series_metadata(
     )
 
 
-def _local_midnight_rows(
-    tariffs: list[FlatTariff],
-    start: datetime,
-    end: datetime,
-) -> dict[datetime, float]:
-    """Return GBP standing charge at each applicable local billing-day start."""
-    if not tariffs or start >= end:
-        return {}
+def _expected_pt30m_count(day: date) -> int:
+    """Return the number of half-hours in one Europe/London billing day."""
+    start = datetime.combine(day, time.min, tzinfo=UK_TZ).astimezone(UTC)
+    end = datetime.combine(day + timedelta(days=1), time.min, tzinfo=UK_TZ).astimezone(UTC)
+    return int((end - start).total_seconds() // 1800)
 
-    first_day = start.astimezone(UK_TZ).date() - timedelta(days=1)
-    last_day = end.astimezone(UK_TZ).date() + timedelta(days=1)
-    current = first_day
-    result: dict[datetime, float] = {}
-    while current <= last_day:
-        local_midnight = datetime.combine(current, time.min, tzinfo=UK_TZ)
-        instant = local_midnight.astimezone(UTC)
-        if start <= instant < end:
-            tariff = tariff_for_day(tariffs, current)
-            if tariff is not None:
-                result[instant] = tariff.standing_charge_pence_per_day / 100.0
-        current += timedelta(days=1)
-    return result
+
+def _billing_midnight(day: date) -> datetime:
+    """Return a billing day's timezone-aware midnight as a UTC instant."""
+    return datetime.combine(day, time.min, tzinfo=UK_TZ).astimezone(UTC)
 
 
 def _build_hourly_statistics(
     records: list[dict[str, Any]],
-    tariffs: list[FlatTariff],
+    tariffs: list[Any],
     start: datetime,
     end: datetime,
     running: dict[str, float] | None = None,
+    *,
+    daily_costs: dict[date, float] | None = None,
 ) -> tuple[dict[str, list[StatisticData]], dict[str, float]]:
-    """Build deterministic hourly projections without changing raw ledger facts."""
+    """Build deterministic projections without changing raw Bright facts."""
+    del tariffs  # Tariffs describe current rates; historical billing comes from Bright cost data.
     totals = {measure: 0.0 for measure in MEASURES}
     if running:
         for measure in MEASURES:
@@ -137,33 +128,36 @@ def _build_hourly_statistics(
             "has_usage_cost": False,
         }
     )
+    daily_usage_cost: dict[date, float] = defaultdict(float)
+    daily_usage_cost_count: dict[date, int] = defaultdict(int)
+
     for record in records:
-        timestamp = _parse_utc(str(record["timestamp"]))
-        if not start <= timestamp < end:
+        raw_timestamp = _parse_utc(str(record["timestamp"]))
+        if not start <= raw_timestamp < end:
             continue
-        hour = _hour_start(timestamp)
+        interval_start = canonical_pt30m_start(raw_timestamp)
+        hour = interval_start.replace(minute=0, second=0, microsecond=0)
+        billing_day = interval_start.astimezone(UK_TZ).date()
+
         usage = record.get("usage_kwh")
         if usage is not None:
             buckets[hour]["consumption"] = float(buckets[hour]["consumption"]) + float(usage)
             buckets[hour]["has_consumption"] = True
+
         cost = record.get("cost_pence")
         if cost is not None:
-            buckets[hour]["usage_cost"] = float(buckets[hour]["usage_cost"]) + float(cost) / 100.0
+            cost_gbp = float(cost) / 100.0
+            buckets[hour]["usage_cost"] = float(buckets[hour]["usage_cost"]) + cost_gbp
             buckets[hour]["has_usage_cost"] = True
+            daily_usage_cost[billing_day] += cost_gbp
+            daily_usage_cost_count[billing_day] += 1
 
-    standing = _local_midnight_rows(tariffs, start, end)
-    hours = sorted(set(buckets) | set(standing))
     result: dict[str, list[StatisticData]] = {measure: [] for measure in MEASURES}
 
-    for hour in hours:
-        bucket = buckets.get(hour, {})
-        has_consumption = bool(bucket.get("has_consumption", False))
-        has_usage_cost = bool(bucket.get("has_usage_cost", False))
-        consumption = float(bucket.get("consumption", 0.0))
-        usage_cost = float(bucket.get("usage_cost", 0.0))
-        standing_charge = standing.get(hour)
-
-        if has_consumption:
+    for hour in sorted(buckets):
+        bucket = buckets[hour]
+        if bool(bucket["has_consumption"]):
+            consumption = float(bucket["consumption"])
             totals[MEASURE_CONSUMPTION] += consumption
             result[MEASURE_CONSUMPTION].append(
                 StatisticData(
@@ -173,7 +167,8 @@ def _build_hourly_statistics(
                 )
             )
 
-        if has_usage_cost:
+        if bool(bucket["has_usage_cost"]):
+            usage_cost = float(bucket["usage_cost"])
             totals[MEASURE_USAGE_COST] += usage_cost
             result[MEASURE_USAGE_COST].append(
                 StatisticData(
@@ -183,38 +178,44 @@ def _build_hourly_statistics(
                 )
             )
 
-        if standing_charge is not None:
-            totals[MEASURE_STANDING_CHARGE] += standing_charge
-            result[MEASURE_STANDING_CHARGE].append(
-                StatisticData(
-                    start=hour,
-                    state=standing_charge,
-                    sum=totals[MEASURE_STANDING_CHARGE],
-                )
-            )
+    # Bright P1D cost is the authoritative billed total for a completed local day.
+    # Standing charge is only derived where PT30M cost coverage for that day is
+    # complete, so a missing upstream interval can never be silently folded into it.
+    for billing_day, total_pence in sorted((daily_costs or {}).items()):
+        midnight = _billing_midnight(billing_day)
+        if not start <= midnight < end:
+            continue
 
-        # A total-cost projection is only emitted where a flat tariff proves
-        # the standing-charge component for the local billing day. Bright PT30M
-        # cost remains the usage-cost source; we never derive it from consumption.
-        local_day: date = hour.astimezone(UK_TZ).date()
-        if tariff_for_day(tariffs, local_day) is not None and (
-            has_usage_cost or standing_charge is not None
-        ):
-            total_cost = usage_cost + (standing_charge or 0.0)
-            totals[MEASURE_TOTAL_COST] += total_cost
-            result[MEASURE_TOTAL_COST].append(
-                StatisticData(
-                    start=hour,
-                    state=total_cost,
-                    sum=totals[MEASURE_TOTAL_COST],
-                )
+        total_cost = float(total_pence) / 100.0
+        totals[MEASURE_TOTAL_COST] += total_cost
+        result[MEASURE_TOTAL_COST].append(
+            StatisticData(
+                start=midnight,
+                state=total_cost,
+                sum=totals[MEASURE_TOTAL_COST],
             )
+        )
+
+        if daily_usage_cost_count.get(billing_day, 0) != _expected_pt30m_count(billing_day):
+            continue
+        standing_charge = total_cost - daily_usage_cost.get(billing_day, 0.0)
+        if standing_charge < -0.005:
+            continue
+        standing_charge = max(0.0, standing_charge)
+        totals[MEASURE_STANDING_CHARGE] += standing_charge
+        result[MEASURE_STANDING_CHARGE].append(
+            StatisticData(
+                start=midnight,
+                state=standing_charge,
+                sum=totals[MEASURE_STANDING_CHARGE],
+            )
+        )
 
     return result, totals
 
 
 class StatisticsProjectionStore:
-    """Persist only projection cursors/totals; the interval ledger remains truth."""
+    """Persist only projection cursors/totals; the raw history remains truth."""
 
     def __init__(self, hass: HomeAssistant, entry_id: str) -> None:
         self._store = Store(
@@ -258,13 +259,30 @@ def _month_keys(start: datetime, end: datetime) -> list[str]:
     return result
 
 
+def _local_month_keys(start: datetime, end: datetime) -> list[str]:
+    """Return local calendar months that can contribute P1D billing evidence."""
+    if start >= end:
+        return []
+    first = canonical_pt30m_start(start).astimezone(UK_TZ).date().replace(day=1)
+    last = (end - timedelta(microseconds=1)).astimezone(UK_TZ).date().replace(day=1)
+    current = first
+    result: list[str] = []
+    while current <= last:
+        result.append(f"{current.year:04d}-{current.month:02d}")
+        if current.month == 12:
+            current = current.replace(year=current.year + 1, month=1)
+        else:
+            current = current.replace(month=current.month + 1)
+    return result
+
+
 async def _load_range(
     history: IntervalHistoryStore,
     commodity: str,
     start: datetime,
     end: datetime,
 ) -> list[dict[str, Any]]:
-    """Load durable interval rows in a UTC half-open range."""
+    """Load durable raw interval rows in a UTC half-open range."""
     records: list[dict[str, Any]] = []
     for month in _month_keys(start, end):
         stored = await history.async_load_month(commodity, month)
@@ -275,13 +293,35 @@ async def _load_range(
     return sorted(records, key=lambda item: _parse_utc(str(item["timestamp"])))
 
 
+async def _load_daily_costs(
+    history: IntervalHistoryStore,
+    commodity: str,
+    start: datetime,
+    end: datetime,
+) -> dict[date, float]:
+    """Load Bright P1D cost evidence keyed by Europe/London billing day."""
+    result: dict[date, float] = {}
+    for month in _local_month_keys(start, end):
+        stored = await history.async_load_daily_cost_month(commodity, month)
+        for record in stored.values():
+            raw_day = record.get("billing_day")
+            raw_cost = record.get("cost_pence")
+            if raw_day is None or raw_cost is None:
+                continue
+            billing_day = date.fromisoformat(str(raw_day))
+            midnight = _billing_midnight(billing_day)
+            if start <= midnight < end:
+                result[billing_day] = float(raw_cost)
+    return result
+
+
 async def async_project_interval_history(
     hass: HomeAssistant,
     entry_id: str,
     *,
     history_metadata: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    """Incrementally project durable ledger rows into HA external statistics."""
+    """Incrementally project durable Bright history into HA external statistics."""
     history = IntervalHistoryStore(hass, entry_id)
     metadata = history_metadata or await history.async_load_metadata()
     projection = StatisticsProjectionStore(hass, entry_id)
@@ -314,17 +354,16 @@ async def async_project_interval_history(
             continue
 
         records = await _load_range(history, commodity, projection_start, ledger_end)
-        tariff_state = await history.async_load_tariffs(commodity)
-        raw_tariffs = tariff_state.get("rows", [])
-        tariffs = parse_flat_tariffs(raw_tariffs if isinstance(raw_tariffs, list) else [])
+        daily_costs = await _load_daily_costs(history, commodity, projection_start, ledger_end)
         running_raw = commodity_state.get("running", {})
         running = running_raw if isinstance(running_raw, dict) else {}
         batches, new_running = _build_hourly_statistics(
             records,
-            tariffs,
+            [],
             projection_start,
             ledger_end,
             running,
+            daily_costs=daily_costs,
         )
 
         for measure, statistics in batches.items():
