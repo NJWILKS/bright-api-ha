@@ -2,37 +2,50 @@
 from __future__ import annotations
 
 import asyncio
+from typing import Any
 
 import voluptuous as vol
 from homeassistant.core import HomeAssistant, ServiceCall, callback
 from homeassistant.exceptions import HomeAssistantError, ServiceValidationError
 from homeassistant.helpers.service import async_register_admin_service
 
-from .api import BrightApiError, BrightAuthError
+from .api import BrightApiClient, BrightApiError, BrightAuthError
 from .const import DOMAIN
+from .orchestrator import async_sync_history_and_statistics_once
 from .rebuild import async_reset_and_rebuild
 from .statistics import StatisticsProjectionError
 
+SERVICE_SYNC_NOW = "sync_now"
 SERVICE_RESET_REBUILD = "reset_rebuild"
 ATTR_ENTRY = "entry"
 
 
 @callback
 def async_setup_services(hass: HomeAssistant) -> None:
-    """Register destructive Bright actions as admin-only services."""
+    """Register Bright actions as admin-only services."""
+    schema = vol.Schema({vol.Required(ATTR_ENTRY): str})
+    async_register_admin_service(
+        hass,
+        DOMAIN,
+        SERVICE_SYNC_NOW,
+        async_handle_sync_now,
+        schema=schema,
+    )
     async_register_admin_service(
         hass,
         DOMAIN,
         SERVICE_RESET_REBUILD,
         async_handle_reset_rebuild,
-        schema=vol.Schema({vol.Required(ATTR_ENTRY): str}),
+        schema=schema,
     )
 
 
-async def async_handle_reset_rebuild(call: ServiceCall) -> None:
-    """Reset and rebuild one loaded Bright config entry."""
-    entry_id = str(call.data[ATTR_ENTRY])
-    runtime = call.hass.data.get(DOMAIN, {}).get(entry_id)
+def _loaded_runtime(
+    hass: HomeAssistant,
+    entry_id: str,
+) -> tuple[BrightApiClient, dict[str, dict[str, Any]], asyncio.Lock]:
+    """Return validated runtime objects for one loaded Bright entry."""
+    runtime = hass.data.get(DOMAIN, {}).get(entry_id)
     if not isinstance(runtime, dict):
         raise ServiceValidationError("The selected Bright API config entry is not loaded")
 
@@ -40,11 +53,35 @@ async def async_handle_reset_rebuild(call: ServiceCall) -> None:
     resources = runtime.get("resources")
     operation_lock = runtime.get("operation_lock")
     if (
-        client is None
+        not isinstance(client, BrightApiClient)
         or not isinstance(resources, dict)
         or not isinstance(operation_lock, asyncio.Lock)
     ):
         raise ServiceValidationError("The selected Bright API config entry is not ready")
+    return client, resources, operation_lock
+
+
+async def async_handle_sync_now(call: ServiceCall) -> None:
+    """Reconcile recent Bright history and project it immediately."""
+    entry_id = str(call.data[ATTR_ENTRY])
+    client, resources, operation_lock = _loaded_runtime(call.hass, entry_id)
+
+    try:
+        await async_sync_history_and_statistics_once(
+            call.hass,
+            client,
+            resources,
+            entry_id,
+            operation_lock,
+        )
+    except (BrightApiError, BrightAuthError, StatisticsProjectionError) as err:
+        raise HomeAssistantError(f"Bright sync failed: {err}") from err
+
+
+async def async_handle_reset_rebuild(call: ServiceCall) -> None:
+    """Reset and rebuild one loaded Bright config entry."""
+    entry_id = str(call.data[ATTR_ENTRY])
+    client, resources, operation_lock = _loaded_runtime(call.hass, entry_id)
 
     async with operation_lock:
         try:
