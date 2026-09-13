@@ -25,5 +25,34 @@
     "abort": {
       "already_configured": "This Bright smart meter is already configured."
     }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "History maintenance",
+        "description": "Repair Bright history without deleting existing ledger data or statistics.",
+        "menu_options": {
+          "fetch_history": "Fetch history by date",
+          "refresh_all": "Refresh all history"
+        }
+      },
+      "fetch_history": {
+        "title": "Fetch history by date",
+        "description": "Re-fetch the selected settled UK billing days from Bright and replay Home Assistant statistics from the first affected day.",
+        "data": {
+          "start_date": "From",
+          "end_date": "To"
+        }
+      },
+      "refresh_all": {
+        "title": "Refresh all history",
+        "description": "Re-fetch all retrievable Bright history and replay the resulting Home Assistant statistics. Existing raw history is updated in place; nothing is deleted. Submit to continue."
+      }
+    },
+    "error": {
+      "invalid_range": "Choose a valid date range ending no later than the latest settled billing day.",
+      "not_ready": "The Bright integration is not currently loaded and ready.",
+      "refresh_failed": "The Bright history refresh failed. Check the Home Assistant log for details and try again."
+    }
   }
 }
