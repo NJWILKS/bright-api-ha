@@ -13,7 +13,7 @@ from custom_components.bright_api.const import CONF_VIRTUAL_ENTITY_ID, DOMAIN
 
 
 @pytest.mark.asyncio
-async def test_history_maintenance_options_flow(hass) -> None:
+async def test_history_maintenance_options_flow(hass, enable_custom_integrations) -> None:
     # Importing the ConfigFlow class registers the domain's options-flow factory.
     assert BrightApiConfigFlow.VERSION == 1
     entry = MockConfigEntry(
