@@ -1,13 +1,21 @@
 from __future__ import annotations
 
+import asyncio
 from datetime import UTC, datetime
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
 import pytest
 
+from custom_components.bright_api import services
 from custom_components.bright_api.api import BrightApiClient
+from custom_components.bright_api.const import DOMAIN
 from custom_components.bright_api.history import IntervalHistoryStore
+from custom_components.bright_api.services import (
+    ATTR_ENTRY,
+    SERVICE_SYNC_NOW,
+    async_setup_services,
+)
 from custom_components.bright_api.statistics import (
     MEASURE_CONSUMPTION,
     StatisticsProjectionStore,
@@ -155,4 +163,34 @@ async def test_reconciled_projection_replays_recent_tail_with_correct_prefix(has
     assert statistics[0]["sum"] == pytest.approx(3.0)
     assert state["commodities"]["electricity"]["running"][MEASURE_CONSUMPTION] == pytest.approx(
         3.0
+    )
+
+
+@pytest.mark.asyncio
+async def test_sync_now_action_targets_loaded_entry(hass, monkeypatch) -> None:
+    operation_lock = asyncio.Lock()
+    client = object()
+    resources = {"electricity.consumption": {"resource_id": "usage-id"}}
+    hass.data.setdefault(DOMAIN, {})["entry-1"] = {
+        "client": client,
+        "resources": resources,
+        "operation_lock": operation_lock,
+    }
+    sync_now = AsyncMock()
+    monkeypatch.setattr(services, "async_sync_history_and_statistics_once", sync_now)
+
+    async_setup_services(hass)
+    await hass.services.async_call(
+        DOMAIN,
+        SERVICE_SYNC_NOW,
+        {ATTR_ENTRY: "entry-1"},
+        blocking=True,
+    )
+
+    sync_now.assert_awaited_once_with(
+        hass,
+        client,
+        resources,
+        "entry-1",
+        operation_lock,
     )
