@@ -9,7 +9,7 @@ from homeassistant.core import HomeAssistant, ServiceCall, callback
 from homeassistant.exceptions import HomeAssistantError, ServiceValidationError
 from homeassistant.helpers.service import async_register_admin_service
 
-from .api import BrightApiClient, BrightApiError, BrightAuthError
+from .api import BrightApiError, BrightAuthError
 from .const import DOMAIN
 from .orchestrator import async_sync_history_and_statistics_once
 from .rebuild import async_reset_and_rebuild
@@ -43,7 +43,7 @@ def async_setup_services(hass: HomeAssistant) -> None:
 def _loaded_runtime(
     hass: HomeAssistant,
     entry_id: str,
-) -> tuple[BrightApiClient, dict[str, dict[str, Any]], asyncio.Lock]:
+) -> tuple[Any, dict[str, dict[str, Any]], asyncio.Lock]:
     """Return validated runtime objects for one loaded Bright entry."""
     runtime = hass.data.get(DOMAIN, {}).get(entry_id)
     if not isinstance(runtime, dict):
@@ -53,7 +53,7 @@ def _loaded_runtime(
     resources = runtime.get("resources")
     operation_lock = runtime.get("operation_lock")
     if (
-        not isinstance(client, BrightApiClient)
+        client is None
         or not isinstance(resources, dict)
         or not isinstance(operation_lock, asyncio.Lock)
     ):
