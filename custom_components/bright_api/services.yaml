@@ -1,3 +1,18 @@
+sync_now:
+  name: Sync Bright history now
+  description: >-
+    Re-fetches the recent settled Bright history overlap for the selected entry,
+    repairs any late-arriving PT30M or daily billed-cost data, and replays the
+    affected Home Assistant statistics window.
+  fields:
+    entry:
+      name: Bright configuration
+      description: The Bright API config entry to synchronize now.
+      required: true
+      selector:
+        config_entry:
+          integration: "bright_api"
+
 reset_rebuild:
   name: Reset and rebuild Bright history
   description: >-
