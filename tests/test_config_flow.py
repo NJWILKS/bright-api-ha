@@ -12,10 +12,9 @@ from custom_components.bright_api.config_flow import BrightApiConfigFlow
 from custom_components.bright_api.const import CONF_VIRTUAL_ENTITY_ID, DOMAIN
 
 
+@pytest.mark.usefixtures("recorder_mock", "enable_custom_integrations")
 @pytest.mark.asyncio
-async def test_history_maintenance_options_flow(
-    hass, enable_custom_integrations, recorder_mock
-) -> None:
+async def test_history_maintenance_options_flow(hass) -> None:
     # Importing the ConfigFlow class registers the domain's options-flow factory.
     assert BrightApiConfigFlow.VERSION == 1
     entry = MockConfigEntry(
