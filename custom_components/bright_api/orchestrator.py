@@ -12,6 +12,7 @@ from homeassistant.helpers.dispatcher import async_dispatcher_send
 from .api import BrightApiClient, BrightApiError, BrightAuthError
 from .const import DOMAIN
 from .history import (
+    COMMODITIES,
     IntervalHistoryStore,
     _history_due,
     _latest_settled_boundary,
@@ -56,6 +57,18 @@ async def async_sync_history_and_statistics_once(
                     entry_id,
                     now_utc=now,
                 )
+            else:
+                # A reload or explicit sync must pick up tariff edits even when
+                # settled readings have already reached the history boundary.
+                states = metadata.setdefault("commodities", {})
+                for commodity, (usage_classifier, cost_classifier) in COMMODITIES.items():
+                    cost_resource = resources.get(cost_classifier)
+                    if usage_classifier not in resources or cost_resource is None:
+                        continue
+                    tariffs = await client.get_tariffs(cost_resource["resource_id"])
+                    await repository.async_save_tariffs(commodity, tariffs, now)
+                    states.setdefault(commodity, {})["tariff_rows"] = len(tariffs)
+                await repository.async_save_metadata(metadata)
 
             # Bright can publish settled data later than our 04:00 query. Always
             # re-fetch a short overlap instead of trusting an advanced cursor to

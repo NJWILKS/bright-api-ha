@@ -138,3 +138,68 @@ async def test_full_refresh_uses_first_retrievable_day_to_latest_settled(hass) -
         date(2026, 9, 1),
         date(2026, 9, 12),
     )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("commodity", ["electricity", "gas"])
+@pytest.mark.parametrize("full_refresh", [False, True])
+async def test_manual_refresh_replaces_stale_tariffs_and_preserves_api_costs(
+    hass, commodity, full_refresh
+) -> None:
+    repository = IntervalHistoryStore(hass, "entry-1")
+    await repository.async_save_metadata(
+        {
+            "schema_version": 1,
+            "commodities": {
+                commodity: {"first_interval": "2026-09-01T00:00:00+00:00"}
+            },
+        }
+    )
+    await repository.async_save_tariffs(
+        commodity, [], datetime(2026, 9, 1, tzinfo=UTC)
+    )
+    tariffs = [{"effectiveDate": "2026-09-01", "rate": 5.04, "standingCharge": 30.0}]
+    timestamp = datetime(2026, 9, 1, 12, tzinfo=UTC)
+    client = AsyncMock(spec=BrightApiClient)
+    client.get_tariffs.return_value = tariffs
+
+    async def readings(resource_id, start, end, *, period="PT30M"):
+        if period == "P1D":
+            return [(datetime(2026, 9, 1, tzinfo=UTC), 42.3)]
+        return [(timestamp, 5.0 if resource_id == "usage-id" else 12.3)]
+
+    client.get_readings.side_effect = readings
+    resources = {
+        f"{commodity}.consumption": {"resource_id": "usage-id"},
+        f"{commodity}.consumption.cost": {"resource_id": "cost-id"},
+    }
+    with (
+        patch(
+            "custom_components.bright_api.manual_history.latest_settled_billing_day",
+            return_value=date(2026, 9, 1),
+        ),
+        patch(
+            "custom_components.bright_api.manual_history.async_project_reconciled_history",
+            new=AsyncMock(),
+        ) as project,
+    ):
+        if full_refresh:
+            await async_refresh_all_history(
+                hass, client, resources, "entry-1", asyncio.Lock()
+            )
+        else:
+            await async_refresh_history_range(
+                hass, client, resources, "entry-1", asyncio.Lock(),
+                date(2026, 9, 1), date(2026, 9, 1),
+            )
+
+    client.get_tariffs.assert_awaited_once_with("cost-id")
+    assert (await repository.async_load_tariffs(commodity))["rows"] == tariffs
+    assert (await repository.async_load_metadata())["commodities"][commodity][
+        "tariff_rows"
+    ] == 1
+    intervals = await repository.async_load_month(commodity, "2026-09")
+    assert intervals[timestamp.isoformat()]["cost_pence"] == pytest.approx(12.3)
+    daily = await repository.async_load_daily_cost_month(commodity, "2026-09")
+    assert daily["2026-09-01"]["cost_pence"] == pytest.approx(42.3)
+    project.assert_awaited_once()
