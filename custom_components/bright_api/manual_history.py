@@ -73,6 +73,12 @@ async def _refresh_range_unlocked(
         any_supported = True
 
         state = states.setdefault(commodity, {})
+        cost_resource = resources.get(cost_classifier)
+        if cost_resource is not None:
+            tariffs = await client.get_tariffs(cost_resource["resource_id"])
+            await repository.async_save_tariffs(commodity, tariffs, datetime.now(UTC))
+            state["tariff_rows"] = len(tariffs)
+
         first = (
             _parse_utc(str(state["first_interval"]))
             if state.get("first_interval")
