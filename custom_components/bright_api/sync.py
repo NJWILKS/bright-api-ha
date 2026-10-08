@@ -21,7 +21,7 @@ from .statistics import (
     StatisticsProjectionError,
     StatisticsProjectionStore,
     _build_hourly_statistics,
-    _hour_start,
+    _ledger_projection_start,
     _load_daily_costs,
     _load_range,
     _series_metadata,
@@ -137,7 +137,7 @@ async def async_project_reconciled_history(
         if not first_raw or not end_raw:
             continue
 
-        ledger_start = _hour_start(_parse_utc(str(first_raw)))
+        ledger_start = _ledger_projection_start(_parse_utc(str(first_raw)))
         ledger_end = _parse_utc(str(end_raw))
         commodity_state = projected.setdefault(commodity, {})
         existing_cursor = (
