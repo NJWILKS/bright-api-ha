@@ -68,6 +68,12 @@ def _hour_start(value: datetime) -> datetime:
     return canonical_pt30m_start(value).replace(minute=0, second=0, microsecond=0)
 
 
+def _ledger_projection_start(first_interval: datetime) -> datetime:
+    """Include the first interval's billing day, even when usage starts mid-day."""
+    billing_day = canonical_pt30m_start(first_interval).astimezone(UK_TZ).date()
+    return _billing_midnight(billing_day)
+
+
 def _series_metadata(
     entry_id: str,
     commodity: str,
@@ -342,7 +348,7 @@ async def async_project_interval_history(
         if not first_raw or not end_raw:
             continue
 
-        ledger_start = _hour_start(_parse_utc(str(first_raw)))
+        ledger_start = _ledger_projection_start(_parse_utc(str(first_raw)))
         ledger_end = _parse_utc(str(end_raw))
         commodity_state = projected.setdefault(commodity, {})
         projection_start = (

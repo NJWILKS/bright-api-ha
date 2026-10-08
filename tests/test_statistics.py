@@ -17,6 +17,7 @@ from custom_components.bright_api.statistics import (
     async_project_interval_history,
     owned_statistic_ids,
 )
+from custom_components.bright_api.sync import async_project_reconciled_history
 
 
 def test_hourly_projection_separates_usage_billed_total_and_standing() -> None:
@@ -165,3 +166,56 @@ async def test_projection_checkpoint_advances_only_after_recorder_finishes(hass)
     assert persisted["commodities"]["electricity"]["running"][MEASURE_TOTAL_COST] == pytest.approx(
         0.74
     )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("commodity", ["electricity", "gas"])
+@pytest.mark.parametrize("replay", [False, True])
+async def test_first_midday_reading_preserves_first_billed_day(hass, commodity, replay) -> None:
+    entry_id = "entry-midday"
+    midnight = datetime(2026, 10, 4, 23, tzinfo=UTC)
+    first = midnight + timedelta(hours=12)
+    end = midnight + timedelta(days=1)
+    history = IntervalHistoryStore(hass, entry_id)
+    await history.async_upsert_intervals(
+        commodity,
+        [{"timestamp": first.isoformat(), "usage_kwh": 5.0, "cost_pence": 25.0}],
+    )
+    await history.async_upsert_daily_costs(commodity, [(midnight, 250.0)])
+    metadata = {"commodities": {commodity: {
+        "first_interval": first.isoformat(), "cursor_utc": end.isoformat(),
+    }}}
+    if replay:
+        await StatisticsProjectionStore(hass, entry_id).async_save({
+            "commodities": {commodity: {"cursor_utc": end.isoformat(), "running": {}}},
+        })
+    module = "sync" if replay else "statistics"
+    recorder = SimpleNamespace(async_block_till_done=AsyncMock())
+    with (
+        patch(f"custom_components.bright_api.{module}.get_instance", return_value=recorder),
+        patch(f"custom_components.bright_api.{module}.async_add_external_statistics") as add_stats,
+    ):
+        if replay:
+            state = await async_project_reconciled_history(
+                hass, entry_id, history_metadata=metadata, replay_from=midnight,
+            )
+        else:
+            state = await async_project_interval_history(hass, entry_id, history_metadata=metadata)
+
+    series = {
+        call.args[1]["statistic_id"].rsplit("_", 2)[-1]: call.args[2]
+        for call in add_stats.call_args_list
+    }
+    billed = next(
+        call.args[2] for call in add_stats.call_args_list
+        if call.args[1]["statistic_id"].endswith("_total_cost")
+    )
+    assert billed == [{"start": midnight, "state": 2.5, "sum": 2.5}]
+    running = state["commodities"][commodity]["running"]
+    assert running[MEASURE_CONSUMPTION] == pytest.approx(5.0)
+    assert running[MEASURE_USAGE_COST] == pytest.approx(0.25)
+    assert running[MEASURE_TOTAL_COST] == pytest.approx(2.5)
+    assert running[MEASURE_STANDING_CHARGE] == 0.0
+    consumption = series["consumption"]
+    assert len(consumption) == 1
+    assert consumption[0]["start"] == first
