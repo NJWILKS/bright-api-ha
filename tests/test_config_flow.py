@@ -88,7 +88,7 @@ async def test_daily_refresh_time_options_flow(hass) -> None:
         CONF_HISTORY_REFRESH_TIME
     }
     refresh_time_key = next(iter(result["data_schema"].schema))
-    assert refresh_time_key.default == "06:00:00"
+    assert refresh_time_key.default() == "06:00:00"
 
     result = await hass.config_entries.options.async_configure(
         result["flow_id"],
