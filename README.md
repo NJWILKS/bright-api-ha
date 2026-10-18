@@ -11,7 +11,7 @@ The integration treats Bright's settled historical data as evidence rather than 
 - stores Bright P1D billed-cost evidence separately from PT30M facts;
 - projects the durable ledger into Home Assistant external statistics;
 - resumes safely after restart without duplicating interval or billing-day data;
-- refreshes newly settled history once each day at **04:00 Europe/London**;
+- refreshes newly settled history once each day at a configurable **Europe/London** time (default **06:00**);
 - never exposes Bright's cumulative meter total as an entity or statistic.
 
 The interval ledger is the historical source of truth for this integration. Home Assistant statistics are a rebuildable projection of that ledger.

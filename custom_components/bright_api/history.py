@@ -16,6 +16,8 @@ from .const import (
     CLASSIFIER_ELECTRICITY_COST,
     CLASSIFIER_GAS_CONSUMPTION,
     CLASSIFIER_GAS_COST,
+    CONF_HISTORY_REFRESH_TIME,
+    DEFAULT_HISTORY_REFRESH_TIME,
     DOMAIN,
 )
 from .interval_semantics import canonical_pt30m_start
@@ -25,7 +27,22 @@ _LOGGER = logging.getLogger(__name__)
 HISTORY_STORAGE_VERSION = 1
 HISTORY_SCHEMA_VERSION = 1
 HISTORY_CHUNK_DAYS = 9
-HISTORY_REFRESH_LOCAL_TIME = time(4, 0)
+HISTORY_REFRESH_LOCAL_TIME = time.fromisoformat(DEFAULT_HISTORY_REFRESH_TIME)
+
+
+def configured_history_refresh_time(options: dict[str, Any] | None = None) -> time:
+    """Return the configured local refresh time, falling back safely."""
+    raw = (options or {}).get(CONF_HISTORY_REFRESH_TIME, DEFAULT_HISTORY_REFRESH_TIME)
+    try:
+        return raw if isinstance(raw, time) else time.fromisoformat(str(raw))
+    except ValueError:
+        _LOGGER.warning(
+            "Invalid Bright history refresh time %r; using %s",
+            raw,
+            DEFAULT_HISTORY_REFRESH_TIME,
+        )
+        return HISTORY_REFRESH_LOCAL_TIME
+
 
 COMMODITIES: dict[str, tuple[str, str]] = {
     "electricity": (
@@ -52,23 +69,29 @@ def _parse_utc(value: str) -> datetime:
     return parsed.astimezone(UTC)
 
 
-def _latest_settled_boundary(value: datetime) -> datetime:
+def _latest_settled_boundary(
+    value: datetime,
+    refresh_time: time = HISTORY_REFRESH_LOCAL_TIME,
+) -> datetime:
     """Return the latest settled Europe/London billing-day boundary in UTC."""
     local = value.astimezone(UK_TZ)
     settled_date = local.date()
-    if local.timetz().replace(tzinfo=None) < HISTORY_REFRESH_LOCAL_TIME:
+    if local.timetz().replace(tzinfo=None) < refresh_time:
         settled_date -= timedelta(days=1)
     local_midnight = datetime.combine(settled_date, time.min, tzinfo=UK_TZ)
     return local_midnight.astimezone(UTC)
 
 
-def _next_refresh_utc(value: datetime) -> datetime:
-    """Return the next 04:00 Europe/London refresh instant in UTC."""
+def _next_refresh_utc(
+    value: datetime,
+    refresh_time: time = HISTORY_REFRESH_LOCAL_TIME,
+) -> datetime:
+    """Return the next configured Europe/London refresh instant in UTC."""
     local = value.astimezone(UK_TZ)
-    candidate = datetime.combine(local.date(), HISTORY_REFRESH_LOCAL_TIME, tzinfo=UK_TZ)
+    candidate = datetime.combine(local.date(), refresh_time, tzinfo=UK_TZ)
     if local >= candidate:
         next_day = local.date() + timedelta(days=1)
-        candidate = datetime.combine(next_day, HISTORY_REFRESH_LOCAL_TIME, tzinfo=UK_TZ)
+        candidate = datetime.combine(next_day, refresh_time, tzinfo=UK_TZ)
     return candidate.astimezone(UTC)
 
 
@@ -366,10 +389,11 @@ async def async_populate_interval_history(
     entry_id: str,
     *,
     now_utc: datetime | None = None,
+    refresh_time: time = HISTORY_REFRESH_LOCAL_TIME,
 ) -> dict[str, Any]:
     """Populate or resume raw PT30M and P1D history to the settled boundary."""
     now = now_utc or datetime.now(UTC)
-    target_end = _latest_settled_boundary(now)
+    target_end = _latest_settled_boundary(now, refresh_time)
     repository = IntervalHistoryStore(hass, entry_id)
     metadata = await repository.async_load_metadata()
     commodities = metadata.setdefault("commodities", {})
@@ -455,13 +479,17 @@ async def async_interval_history_worker(
     resources: dict[str, dict[str, Any]],
     entry_id: str,
 ) -> None:
-    """Backfill when needed, then refresh settled history once daily at 04:00 UK time."""
+    """Backfill when needed, then refresh settled history once daily at the configured UK time."""
     repository = IntervalHistoryStore(hass, entry_id)
 
     while True:
         now = datetime.now(UTC)
         metadata = await repository.async_load_metadata()
-        target_end = _latest_settled_boundary(now)
+        config_entry = hass.config_entries.async_get_entry(entry_id)
+        refresh_time = configured_history_refresh_time(
+            config_entry.options if config_entry is not None else None
+        )
+        target_end = _latest_settled_boundary(now, refresh_time)
 
         if _history_due(metadata, resources, target_end):
             try:
@@ -471,9 +499,10 @@ async def async_interval_history_worker(
                     resources,
                     entry_id,
                     now_utc=now,
+                    refresh_time=refresh_time,
                 )
             except BrightApiError as err:
                 _LOGGER.warning("Bright interval history population paused: %s", err)
 
-        next_refresh = _next_refresh_utc(now)
+        next_refresh = _next_refresh_utc(now, refresh_time)
         await asyncio.sleep(max(1.0, (next_refresh - datetime.now(UTC)).total_seconds()))

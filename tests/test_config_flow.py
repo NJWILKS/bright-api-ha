@@ -9,7 +9,11 @@ from homeassistant.data_entry_flow import FlowResultType
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.bright_api.config_flow import BrightApiConfigFlow
-from custom_components.bright_api.const import CONF_VIRTUAL_ENTITY_ID, DOMAIN
+from custom_components.bright_api.const import (
+    CONF_HISTORY_REFRESH_TIME,
+    CONF_VIRTUAL_ENTITY_ID,
+    DOMAIN,
+)
 
 
 @pytest.mark.usefixtures("recorder_mock", "enable_custom_integrations")
@@ -31,7 +35,7 @@ async def test_history_maintenance_options_flow(hass) -> None:
     result = await hass.config_entries.options.async_init(entry.entry_id)
     assert result["type"] is FlowResultType.MENU
     assert result["step_id"] == "init"
-    assert result["menu_options"] == ["fetch_history", "refresh_all"]
+    assert result["menu_options"] == ["fetch_history", "refresh_all", "refresh_time"]
 
     result = await hass.config_entries.options.async_configure(
         result["flow_id"],
@@ -57,3 +61,38 @@ async def test_history_maintenance_options_flow(hass) -> None:
 
     assert result["type"] is FlowResultType.CREATE_ENTRY
     refresh.assert_awaited_once()
+
+
+@pytest.mark.usefixtures("recorder_mock", "enable_custom_integrations")
+@pytest.mark.asyncio
+async def test_daily_refresh_time_options_flow(hass) -> None:
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        entry_id="entry-refresh",
+        data={
+            CONF_USERNAME: "user@example.com",
+            CONF_PASSWORD: "secret",
+            CONF_VIRTUAL_ENTITY_ID: "site-refresh",
+        },
+    )
+    entry.add_to_hass(hass)
+
+    result = await hass.config_entries.options.async_init(entry.entry_id)
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"],
+        {"next_step_id": "refresh_time"},
+    )
+    assert result["type"] is FlowResultType.FORM
+    assert result["step_id"] == "refresh_time"
+    assert {str(key) for key in result["data_schema"].schema} == {
+        CONF_HISTORY_REFRESH_TIME
+    }
+    refresh_time_key = next(iter(result["data_schema"].schema))
+    assert result["data_schema"].schema[refresh_time_key].default == "06:00:00"
+
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"],
+        {CONF_HISTORY_REFRESH_TIME: "07:45:00"},
+    )
+    assert result["type"] is FlowResultType.CREATE_ENTRY
+    assert result["data"][CONF_HISTORY_REFRESH_TIME] == "07:45:00"

@@ -13,6 +13,7 @@ from .const import DOMAIN
 from .history import (
     COMMODITIES,
     HISTORY_CHUNK_DAYS,
+    HISTORY_REFRESH_LOCAL_TIME,
     IntervalHistoryStore,
     _fetch_records,
     _first_interval,
@@ -28,9 +29,13 @@ class ManualHistoryError(Exception):
     """Raised when a manual history refresh request is invalid or unavailable."""
 
 
-def latest_settled_billing_day(now_utc: datetime | None = None) -> date:
+def latest_settled_billing_day(
+    now_utc: datetime | None = None,
+    *,
+    refresh_time: time = HISTORY_REFRESH_LOCAL_TIME,
+) -> date:
     """Return the latest fully settled Europe/London billing day."""
-    boundary = _latest_settled_boundary(now_utc or datetime.now(UTC))
+    boundary = _latest_settled_boundary(now_utc or datetime.now(UTC), refresh_time)
     return boundary.astimezone(UK_TZ).date() - timedelta(days=1)
 
 
@@ -45,12 +50,13 @@ async def _refresh_range_unlocked(
     entry_id: str,
     start_day: date,
     end_day: date,
+    refresh_time: time = HISTORY_REFRESH_LOCAL_TIME,
 ) -> datetime:
     """Re-fetch an inclusive local billing-day range into the durable ledger."""
     if start_day > end_day:
         raise ManualHistoryError("Start date must not be after end date")
 
-    latest_day = latest_settled_billing_day()
+    latest_day = latest_settled_billing_day(refresh_time=refresh_time)
     if end_day > latest_day:
         raise ManualHistoryError(
             f"End date must not be after the latest settled day ({latest_day.isoformat()})"
@@ -173,6 +179,8 @@ async def async_refresh_history_range(
     operation_lock: asyncio.Lock,
     start_day: date,
     end_day: date,
+    *,
+    refresh_time: time = HISTORY_REFRESH_LOCAL_TIME,
 ) -> None:
     """Refresh an inclusive local billing-day range and replay affected statistics."""
     async with operation_lock:
@@ -183,6 +191,7 @@ async def async_refresh_history_range(
             entry_id,
             start_day,
             end_day,
+            refresh_time,
         )
 
 
@@ -192,6 +201,8 @@ async def async_refresh_all_history(
     resources: dict[str, dict[str, Any]],
     entry_id: str,
     operation_lock: asyncio.Lock,
+    *,
+    refresh_time: time = HISTORY_REFRESH_LOCAL_TIME,
 ) -> None:
     """Re-fetch all retrievable Bright history without deleting existing evidence."""
     async with operation_lock:
@@ -224,5 +235,6 @@ async def async_refresh_all_history(
             resources,
             entry_id,
             min(first_days),
-            latest_settled_billing_day(),
+            latest_settled_billing_day(refresh_time=refresh_time),
+            refresh_time=refresh_time,
         )

@@ -38,6 +38,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         raise ConfigEntryNotReady(str(err)) from err
 
     operation_lock = asyncio.Lock()
+    entry.async_on_unload(entry.add_update_listener(async_reload_entry))
     hass.data.setdefault(DOMAIN, {})[entry.entry_id] = {
         "client": client,
         "resources": resources,
@@ -50,8 +51,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     # There is deliberately no 15-minute/current-day polling. Bright historical
     # PT30M data is treated as settled daily data: the ledger worker owns the
-    # initial backfill and one 04:00 Europe/London refresh, then the projector
-    # publishes only durable ledger facts to Home Assistant statistics.
+    # initial backfill and one configurable Europe/London refresh (default 06:00).
+    # The projector publishes only durable ledger facts to Home Assistant statistics.
     entry.async_create_background_task(
         hass,
         async_history_and_statistics_worker(
@@ -64,6 +65,11 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         f"{DOMAIN} PT30M history and statistics",
     )
     return True
+
+
+async def async_reload_entry(hass: HomeAssistant, entry: ConfigEntry) -> None:
+    """Reload the worker when Bright options change."""
+    await hass.config_entries.async_reload(entry.entry_id)
 
 
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:

@@ -16,6 +16,7 @@ from .history import (
     IntervalHistoryStore,
     _history_due,
     _latest_settled_boundary,
+    configured_history_refresh_time,
     _next_refresh_utc,
     async_populate_interval_history,
 )
@@ -43,8 +44,12 @@ async def async_sync_history_and_statistics_once(
 
     async with lock:
         now = datetime.now(UTC)
+        config_entry = hass.config_entries.async_get_entry(entry_id)
+        refresh_time = configured_history_refresh_time(
+            config_entry.options if config_entry is not None else None
+        )
         metadata = await repository.async_load_metadata()
-        target_end = _latest_settled_boundary(now)
+        target_end = _latest_settled_boundary(now, refresh_time)
         bright_error: BrightApiError | BrightAuthError | None = None
         replay_from = None
 
@@ -56,6 +61,7 @@ async def async_sync_history_and_statistics_once(
                     resources,
                     entry_id,
                     now_utc=now,
+                    refresh_time=refresh_time,
                 )
             else:
                 # A reload or explicit sync must pick up tariff edits even when
@@ -70,7 +76,7 @@ async def async_sync_history_and_statistics_once(
                     states.setdefault(commodity, {})["tariff_rows"] = len(tariffs)
                 await repository.async_save_metadata(metadata)
 
-            # Bright can publish settled data later than our 04:00 query. Always
+            # Bright can publish settled data after the configured daily query. Always
             # re-fetch a short overlap instead of trusting an advanced cursor to
             # mean every row was actually available at the earlier request time.
             metadata, replay_from = await async_reconcile_recent_history(
@@ -80,6 +86,7 @@ async def async_sync_history_and_statistics_once(
                 entry_id,
                 metadata=metadata,
                 now_utc=now,
+                refresh_time=refresh_time,
             )
             async_dispatcher_send(hass, history_updated_signal(entry_id))
         except (BrightApiError, BrightAuthError) as err:
@@ -137,5 +144,9 @@ async def async_history_and_statistics_worker(
             # one unexpected cycle failure. Log the traceback and retry next day.
             _LOGGER.exception("Unexpected Bright daily sync failure")
 
-        next_refresh = _next_refresh_utc(datetime.now(UTC))
+        config_entry = hass.config_entries.async_get_entry(entry_id)
+        refresh_time = configured_history_refresh_time(
+            config_entry.options if config_entry is not None else None
+        )
+        next_refresh = _next_refresh_utc(datetime.now(UTC), refresh_time)
         await asyncio.sleep(max(1.0, (next_refresh - datetime.now(UTC)).total_seconds()))

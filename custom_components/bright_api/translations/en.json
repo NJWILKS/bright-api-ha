@@ -33,7 +33,8 @@
         "description": "Repair Bright history without deleting existing ledger data or statistics.",
         "menu_options": {
           "fetch_history": "Fetch history by date",
-          "refresh_all": "Refresh all history"
+          "refresh_all": "Refresh all history",
+          "refresh_time": "Daily refresh time"
         }
       },
       "fetch_history": {
@@ -47,12 +48,20 @@
       "refresh_all": {
         "title": "Refresh all history",
         "description": "Re-fetch all retrievable Bright history and replay the resulting Home Assistant statistics. Existing raw history is updated in place; nothing is deleted. Submit to continue."
+      },
+      "refresh_time": {
+        "title": "Daily refresh time",
+        "description": "Choose when Bright history is refreshed each day. The time uses Europe/London, including automatic GMT/BST changes.",
+        "data": {
+          "history_refresh_time": "Refresh time"
+        }
       }
     },
     "error": {
       "invalid_range": "Choose a valid date range ending no later than the latest settled billing day.",
       "not_ready": "The Bright integration is not currently loaded and ready.",
-      "refresh_failed": "The Bright history refresh failed. Check the Home Assistant log for details and try again."
+      "refresh_failed": "The Bright history refresh failed. Check the Home Assistant log for details and try again.",
+      "invalid_time": "Choose a valid daily refresh time."
     }
   }
 }

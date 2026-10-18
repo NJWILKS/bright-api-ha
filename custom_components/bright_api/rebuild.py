@@ -14,6 +14,7 @@ from .history import (
     COMMODITIES,
     HISTORY_STORAGE_VERSION,
     IntervalHistoryStore,
+    configured_history_refresh_time,
     _parse_utc,
     async_populate_interval_history,
 )
@@ -92,12 +93,17 @@ async def async_reset_and_rebuild(
     await async_clear_projected_statistics(hass, entry_id)
     await async_clear_interval_history(hass, entry_id)
 
+    config_entry = hass.config_entries.async_get_entry(entry_id)
+    refresh_time = configured_history_refresh_time(
+        config_entry.options if config_entry is not None else None
+    )
     metadata = await async_populate_interval_history(
         hass,
         client,
         resources,
         entry_id,
         now_utc=datetime.now(UTC),
+        refresh_time=refresh_time,
     )
     projection = await async_project_interval_history(
         hass,
