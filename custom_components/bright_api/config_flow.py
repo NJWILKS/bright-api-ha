@@ -19,13 +19,13 @@ from .const import (
     DEFAULT_HISTORY_REFRESH_TIME,
     DOMAIN,
 )
+from .history import configured_history_refresh_time
 from .manual_history import (
     ManualHistoryError,
     async_refresh_all_history,
     async_refresh_history_range,
     latest_settled_billing_day,
 )
-from .history import configured_history_refresh_time
 from .statistics import StatisticsProjectionError
 
 CONF_START_DATE = "start_date"
