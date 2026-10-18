@@ -11,9 +11,9 @@ from homeassistant.core import HomeAssistant
 from .api import UK_TZ, BrightApiClient
 from .history import (
     COMMODITIES,
+    HISTORY_REFRESH_LOCAL_TIME,
     IntervalHistoryStore,
     _fetch_records,
-    HISTORY_REFRESH_LOCAL_TIME,
     _latest_settled_boundary,
     _parse_utc,
     _utc_iso,

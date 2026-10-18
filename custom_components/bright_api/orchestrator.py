@@ -16,9 +16,9 @@ from .history import (
     IntervalHistoryStore,
     _history_due,
     _latest_settled_boundary,
-    configured_history_refresh_time,
     _next_refresh_utc,
     async_populate_interval_history,
+    configured_history_refresh_time,
 )
 from .statistics import StatisticsProjectionError, async_project_interval_history
 from .sync import async_project_reconciled_history, async_reconcile_recent_history

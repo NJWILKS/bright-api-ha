@@ -14,9 +14,9 @@ from .history import (
     COMMODITIES,
     HISTORY_STORAGE_VERSION,
     IntervalHistoryStore,
-    configured_history_refresh_time,
     _parse_utc,
     async_populate_interval_history,
+    configured_history_refresh_time,
 )
 from .orchestrator import history_updated_signal
 from .statistics import async_clear_projected_statistics, async_project_interval_history
