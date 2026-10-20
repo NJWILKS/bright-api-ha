@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import asyncio
-from datetime import date, timedelta
+from datetime import date, time, timedelta
 from typing import Any
 
 import voluptuous as vol
@@ -13,7 +13,13 @@ from homeassistant.helpers import selector
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
 from .api import BrightApiClient, BrightApiError, BrightAuthError
-from .const import CONF_VIRTUAL_ENTITY_ID, DOMAIN
+from .const import (
+    CONF_HISTORY_REFRESH_TIME,
+    CONF_VIRTUAL_ENTITY_ID,
+    DEFAULT_HISTORY_REFRESH_TIME,
+    DOMAIN,
+)
+from .history import configured_history_refresh_time
 from .manual_history import (
     ManualHistoryError,
     async_refresh_all_history,
@@ -128,13 +134,58 @@ class BrightApiOptionsFlow(config_entries.OptionsFlow):
         """Show history maintenance choices."""
         return self.async_show_menu(
             step_id="init",
-            menu_options=["fetch_history", "refresh_all"],
+            menu_options=["fetch_history", "refresh_all", "refresh_time"],
+        )
+
+    async def async_step_refresh_time(self, user_input: dict[str, Any] | None = None):
+        """Set the daily Bright history refresh time in Europe/London."""
+        if user_input is not None:
+            refresh_time = user_input[CONF_HISTORY_REFRESH_TIME]
+            try:
+                normalized = time.fromisoformat(str(refresh_time)).isoformat(
+                    timespec="seconds"
+                )
+            except ValueError:
+                return self.async_show_form(
+                    step_id="refresh_time",
+                    data_schema=vol.Schema(
+                        {
+                            vol.Required(
+                                CONF_HISTORY_REFRESH_TIME,
+                                default=DEFAULT_HISTORY_REFRESH_TIME,
+                            ): selector.TimeSelector()
+                        }
+                    ),
+                    errors={"base": "invalid_time"},
+                )
+            return self.async_create_entry(
+                title="",
+                data={
+                    **self.config_entry.options,
+                    CONF_HISTORY_REFRESH_TIME: normalized,
+                },
+            )
+
+        default_time = configured_history_refresh_time(self.config_entry.options).isoformat(
+            timespec="seconds"
+        )
+        return self.async_show_form(
+            step_id="refresh_time",
+            data_schema=vol.Schema(
+                {
+                    vol.Required(
+                        CONF_HISTORY_REFRESH_TIME,
+                        default=default_time,
+                    ): selector.TimeSelector()
+                }
+            ),
         )
 
     async def async_step_fetch_history(self, user_input: dict[str, Any] | None = None):
         """Fetch an inclusive billing-date range and replay affected statistics."""
         errors: dict[str, str] = {}
-        settled_day = latest_settled_billing_day()
+        refresh_time = configured_history_refresh_time(self.config_entry.options)
+        settled_day = latest_settled_billing_day(refresh_time=refresh_time)
         default_start = settled_day - timedelta(days=6)
 
         if user_input is not None:
@@ -159,6 +210,7 @@ class BrightApiOptionsFlow(config_entries.OptionsFlow):
                             operation_lock,
                             start_day,
                             end_day,
+                            refresh_time=refresh_time,
                         )
                     except (
                         ManualHistoryError,
@@ -190,6 +242,7 @@ class BrightApiOptionsFlow(config_entries.OptionsFlow):
     async def async_step_refresh_all(self, user_input: dict[str, Any] | None = None):
         """Confirm and run a non-destructive refresh of all retrievable history."""
         errors: dict[str, str] = {}
+        refresh_time = configured_history_refresh_time(self.config_entry.options)
         if user_input is not None:
             if (runtime := self._runtime()) is None:
                 errors["base"] = "not_ready"
@@ -202,6 +255,7 @@ class BrightApiOptionsFlow(config_entries.OptionsFlow):
                         resources,
                         self.config_entry.entry_id,
                         operation_lock,
+                        refresh_time=refresh_time,
                     )
                 except (
                     ManualHistoryError,

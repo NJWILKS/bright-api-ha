@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import asyncio
-from datetime import UTC, date, datetime
+from datetime import UTC, date, datetime, time
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -16,11 +16,11 @@ from custom_components.bright_api.manual_history import (
 )
 
 
-def test_latest_settled_billing_day_uses_uk_0400_boundary() -> None:
+def test_latest_settled_billing_day_uses_uk_0600_boundary() -> None:
     assert latest_settled_billing_day(datetime(2026, 9, 13, 2, 30, tzinfo=UTC)) == date(
         2026, 9, 11
     )
-    assert latest_settled_billing_day(datetime(2026, 9, 13, 4, 30, tzinfo=UTC)) == date(
+    assert latest_settled_billing_day(datetime(2026, 9, 13, 6, 0, tzinfo=UTC)) == date(
         2026, 9, 12
     )
 
@@ -137,6 +137,7 @@ async def test_full_refresh_uses_first_retrievable_day_to_latest_settled(hass) -
         entry_id,
         date(2026, 9, 1),
         date(2026, 9, 12),
+        refresh_time=time(6, 0),
     )
 
 

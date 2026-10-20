@@ -11,6 +11,7 @@ from homeassistant.core import HomeAssistant
 from .api import UK_TZ, BrightApiClient
 from .history import (
     COMMODITIES,
+    HISTORY_REFRESH_LOCAL_TIME,
     IntervalHistoryStore,
     _fetch_records,
     _latest_settled_boundary,
@@ -45,10 +46,11 @@ async def async_reconcile_recent_history(
     *,
     metadata: dict[str, Any] | None = None,
     now_utc: datetime | None = None,
+    refresh_time: time = HISTORY_REFRESH_LOCAL_TIME,
 ) -> tuple[dict[str, Any], datetime]:
     """Re-fetch a bounded overlap without trusting already-advanced cursors."""
     now = now_utc or datetime.now(UTC)
-    target_end = _latest_settled_boundary(now)
+    target_end = _latest_settled_boundary(now, refresh_time)
     reconcile_start = _recent_reconcile_start(target_end)
     target_day = target_end.astimezone(UK_TZ).date()
     repository = IntervalHistoryStore(hass, entry_id)

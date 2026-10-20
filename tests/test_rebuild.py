@@ -103,7 +103,9 @@ async def test_reset_and_rebuild_clears_then_refetches_then_projects(hass, monke
     async def clear_history(_hass, _entry_id):
         order.append("history")
 
-    async def populate(_hass, _client, _resources, _entry_id, *, now_utc=None):
+    async def populate(
+        _hass, _client, _resources, _entry_id, *, now_utc=None, refresh_time=None
+    ):
         assert now_utc is not None
         order.append("populate")
         return metadata

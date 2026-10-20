@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import UTC, datetime, time
 from unittest.mock import AsyncMock
 
 import pytest
@@ -13,34 +13,54 @@ from custom_components.bright_api.history import (
     _merge_rows,
     _next_refresh_utc,
     async_populate_interval_history,
+    configured_history_refresh_time,
 )
 
 
-def test_settled_boundary_waits_until_0400_uk_time() -> None:
-    assert _latest_settled_boundary(datetime(2026, 9, 10, 2, 59, tzinfo=UTC)) == datetime(
+def test_settled_boundary_waits_until_0600_uk_time() -> None:
+    assert _latest_settled_boundary(datetime(2026, 9, 10, 4, 59, tzinfo=UTC)) == datetime(
         2026, 9, 8, 23, 0, tzinfo=UTC
     )
-    assert _latest_settled_boundary(datetime(2026, 9, 10, 3, 0, tzinfo=UTC)) == datetime(
+    assert _latest_settled_boundary(datetime(2026, 9, 10, 5, 0, tzinfo=UTC)) == datetime(
         2026, 9, 9, 23, 0, tzinfo=UTC
     )
-    assert _latest_settled_boundary(datetime(2026, 1, 10, 3, 59, tzinfo=UTC)) == datetime(
+    assert _latest_settled_boundary(datetime(2026, 1, 10, 5, 59, tzinfo=UTC)) == datetime(
         2026, 1, 9, 0, 0, tzinfo=UTC
     )
-    assert _latest_settled_boundary(datetime(2026, 1, 10, 4, 0, tzinfo=UTC)) == datetime(
+    assert _latest_settled_boundary(datetime(2026, 1, 10, 6, 0, tzinfo=UTC)) == datetime(
         2026, 1, 10, 0, 0, tzinfo=UTC
     )
 
 
-def test_next_refresh_tracks_0400_europe_london_across_dst() -> None:
-    assert _next_refresh_utc(datetime(2026, 9, 10, 2, 30, tzinfo=UTC)) == datetime(
-        2026, 9, 10, 3, 0, tzinfo=UTC
+def test_next_refresh_tracks_0600_europe_london_across_dst() -> None:
+    assert _next_refresh_utc(datetime(2026, 9, 10, 4, 30, tzinfo=UTC)) == datetime(
+        2026, 9, 10, 5, 0, tzinfo=UTC
     )
-    assert _next_refresh_utc(datetime(2026, 9, 10, 3, 30, tzinfo=UTC)) == datetime(
-        2026, 9, 11, 3, 0, tzinfo=UTC
+    assert _next_refresh_utc(datetime(2026, 9, 10, 5, 30, tzinfo=UTC)) == datetime(
+        2026, 9, 11, 5, 0, tzinfo=UTC
     )
-    assert _next_refresh_utc(datetime(2025, 10, 25, 5, 0, tzinfo=UTC)) == datetime(
-        2025, 10, 26, 4, 0, tzinfo=UTC
+    assert _next_refresh_utc(datetime(2025, 10, 25, 7, 0, tzinfo=UTC)) == datetime(
+        2025, 10, 26, 6, 0, tzinfo=UTC
     )
+
+
+def test_configured_refresh_time_controls_settled_boundary_and_next_run() -> None:
+    refresh_time = configured_history_refresh_time({"history_refresh_time": "08:15:00"})
+    assert refresh_time == time(8, 15)
+    assert configured_history_refresh_time({}) == time(6, 0)
+
+    assert _latest_settled_boundary(
+        datetime(2026, 9, 10, 6, 30, tzinfo=UTC),
+        refresh_time,
+    ) == datetime(2026, 9, 8, 23, 0, tzinfo=UTC)
+    assert _latest_settled_boundary(
+        datetime(2026, 9, 10, 7, 15, tzinfo=UTC),
+        refresh_time,
+    ) == datetime(2026, 9, 9, 23, 0, tzinfo=UTC)
+    assert _next_refresh_utc(
+        datetime(2026, 9, 10, 6, 30, tzinfo=UTC),
+        refresh_time,
+    ) == datetime(2026, 9, 10, 7, 15, tzinfo=UTC)
 
 
 def test_merge_rows_preserves_zero_and_distinct_dst_instants() -> None:
@@ -183,7 +203,7 @@ async def test_population_resumes_pt30m_and_daily_cost_from_durable_cursors(hass
         client,
         resources,
         "entry-1",
-        now_utc=datetime(2026, 1, 2, 5, 0, tzinfo=UTC),
+        now_utc=datetime(2026, 1, 2, 6, 0, tzinfo=UTC),
     )
 
     electricity = first_pass["commodities"]["electricity"]
@@ -197,7 +217,7 @@ async def test_population_resumes_pt30m_and_daily_cost_from_durable_cursors(hass
         client,
         resources,
         "entry-1",
-        now_utc=datetime(2026, 1, 3, 5, 0, tzinfo=UTC),
+        now_utc=datetime(2026, 1, 3, 6, 0, tzinfo=UTC),
     )
 
     electricity = second_pass["commodities"]["electricity"]

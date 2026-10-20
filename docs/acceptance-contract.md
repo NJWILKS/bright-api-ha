@@ -126,7 +126,7 @@ The integration's consumption truth is the settled PT30M interval series. Home A
 
 All billing-day boundaries are defined in `Europe/London`, then converted to UTC for API/storage cursors. During BST, local midnight is therefore `23:00Z` on the preceding UTC date. Code must never substitute UTC midnight for a local billing boundary.
 
-Initial backfill may make multiple bounded requests until PT30M and P1D evidence are current. Once current, historical ingestion switches to one scheduled refresh cycle at **04:00 Europe/London** each day.
+Initial backfill may make multiple bounded requests until PT30M and P1D evidence are current. Once current, historical ingestion switches to one scheduled refresh cycle each day at the configured **Europe/London** time (default **06:00**).
 
 The daily refresh ingests only newly settled evidence. It must be restart-safe and idempotent. It must not repeatedly poll historical readings throughout the day.
 
@@ -134,7 +134,7 @@ Bright resource APIs are resource-specific, so one scheduled cycle may contain o
 
 **Required evidence**
 
-- Scheduler tests proving the next run resolves to 04:00 Europe/London across BST/GMT transitions.
+- Scheduler tests proving the selected daily time resolves across BST/GMT transitions, with 06:00 Europe/London as the default.
 - Settled-boundary tests proving local midnight is converted correctly to UTC.
 - Tests proving current PT30M and P1D cursors request only un-ingested settled history.
 - Restart tests proving replay cannot duplicate PT30M intervals or P1D billing days.

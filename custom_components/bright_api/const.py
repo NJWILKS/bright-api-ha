@@ -9,6 +9,8 @@ APP_ID: Final = "b0f1b774-a586-4f72-9edd-27ead8aa7a8d"
 ATTRIBUTION: Final = "Data provided by Hildebrand Technology via Glowmarkt API"
 
 CONF_VIRTUAL_ENTITY_ID: Final = "virtual_entity_id"
+CONF_HISTORY_REFRESH_TIME: Final = "history_refresh_time"
+DEFAULT_HISTORY_REFRESH_TIME: Final = "06:00:00"
 
 CLASSIFIER_ELECTRICITY_CONSUMPTION: Final = "electricity.consumption"
 CLASSIFIER_ELECTRICITY_COST: Final = "electricity.consumption.cost"
